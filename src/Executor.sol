@@ -6,9 +6,12 @@ import {IBridgeAdapter} from "./interfaces/IBridgeAdapter.sol";
 import {ICrossChainRegistry} from "./interfaces/ICrossChainRegistry.sol";
 import {ISimpleFundReceiver} from "./interfaces/ISimpleFundReceiver.sol";
 import {Ownable} from "./utils/Ownable.sol";
-import {IERC20} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from
-    "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/utils/SafeERC20.sol";
+import {
+    IERC20
+} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
+import {
+    SafeERC20
+} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title Executor
@@ -128,9 +131,8 @@ contract Executor is IExecutor, Ownable {
         IERC20(intent.token).safeTransfer(intent.receiver, intent.amount);
 
         // Call the receiver to process the payment
-        ISimpleFundReceiver(intent.receiver).processPayment(
-            intent.intentId, intent.sender, intent.token, intent.amount, intent.data
-        );
+        ISimpleFundReceiver(intent.receiver)
+            .processPayment(intent.intentId, intent.sender, intent.token, intent.amount, intent.data);
 
         emit IntentExecuted(intent.intentId, intent.sender, intent.token, intent.amount, intent.receiver);
     }
@@ -154,10 +156,7 @@ contract Executor is IExecutor, Ownable {
 
         // Store refund request
         refundRequests[intentId] = RefundRequest({
-            token: token,
-            amount: amount,
-            recipient: recipient,
-            sourceChainSelector: record.sourceChainSelector
+            token: token, amount: amount, recipient: recipient, sourceChainSelector: record.sourceChainSelector
         });
 
         emit RefundRequested(intentId, token, amount, recipient);
@@ -180,9 +179,8 @@ contract Executor is IExecutor, Ownable {
         }
 
         // Check fee
-        uint256 requiredFee = IBridgeAdapter(adapter).quoteRefundFee(
-            request.sourceChainSelector, request.token, request.amount
-        );
+        uint256 requiredFee =
+            IBridgeAdapter(adapter).quoteRefundFee(request.sourceChainSelector, request.token, request.amount);
         if (msg.value < requiredFee) {
             revert InsufficientFee();
         }

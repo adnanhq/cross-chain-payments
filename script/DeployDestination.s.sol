@@ -31,10 +31,7 @@ contract DeployDestination is Script {
         registry.setChainConfig(
             sourceChainSelector,
             ICrossChainRegistry.ChainConfig({
-                isSupported: true,
-                isPaused: false,
-                minAmount: 0,
-                maxAmount: type(uint256).max
+                isSupported: true, isPaused: false, minAmount: 0, maxAmount: type(uint256).max
             })
         );
 

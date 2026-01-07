@@ -55,7 +55,9 @@ interface ICrossChainRegistry {
     function unpauseChain(uint64 chainSelector) external;
 
     // Events
-    event ChainConfigSet(uint64 indexed chainSelector, bool isSupported, bool isPaused, uint256 minAmount, uint256 maxAmount);
+    event ChainConfigSet(
+        uint64 indexed chainSelector, bool isSupported, bool isPaused, uint256 minAmount, uint256 maxAmount
+    );
     event BridgeAdapterSet(uint64 indexed chainSelector, bytes32 indexed bridgeId, address adapter, bool enabled);
     event ChainPaused(uint64 indexed chainSelector);
     event ChainUnpaused(uint64 indexed chainSelector);
