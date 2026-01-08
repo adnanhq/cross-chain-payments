@@ -104,7 +104,6 @@ forge script script/SendIntent.s.sol \
 - Destination-side intent semantics:
   - `intent.token` is the **destination-chain** ERC20 expected to be delivered
   - `SOURCE_TOKEN` is the **source-chain** ERC20 that CCIP bridges
-- Admin/config functions are `onlyOwner` (owner is the deployer by default). If you want a different admin key, call `transferOwnership(...)` on `Registry`, `Executor`, `Adapter`, and `Receiver`.
 
 Router addresses and chain selectors: https://docs.chain.link/ccip/directory
 
