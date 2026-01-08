@@ -2,13 +2,13 @@
 pragma solidity ^0.8.22;
 
 import {ICrossChainRegistry} from "./interfaces/ICrossChainRegistry.sol";
-import {Ownable} from "./utils/Ownable.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title CrossChainRegistry
  * @notice Manages cross-chain configuration including supported chains and bridge adapters
  */
-contract CrossChainRegistry is ICrossChainRegistry, Ownable {
+contract CrossChainRegistry is ICrossChainRegistry, Ownable(msg.sender) {
     /// @notice Chain configurations
     mapping(uint64 => ChainConfig) private _chainConfigs;
 

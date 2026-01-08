@@ -107,3 +107,11 @@ forge script script/SendIntent.s.sol \
 - Admin/config functions are `onlyOwner` (owner is the deployer by default). If you want a different admin key, call `transferOwnership(...)` on `Registry`, `Executor`, `Adapter`, and `Receiver`.
 
 Router addresses and chain selectors: https://docs.chain.link/ccip/directory
+
+## Sample Cross-Chain Transactions
+
+Example testnet transactions demonstrating the full payment + refund flow:
+
+- **Ethereum Sepolia → Base Sepolia (Payment):** [0xcd5bb85acc91ca6bf76cdce60a2a79974a4037a4ec2f5949a9e58d2c21a6b2a9](https://ccip.chain.link/#/side-drawer/msg/0xcd5bb85acc91ca6bf76cdce60a2a79974a4037a4ec2f5949a9e58d2c21a6b2a9)
+
+- **Base Sepolia → Ethereum Sepolia (Refund):** [0xd6349d3020871e8b6ae64be262732788fd0aeb5a8d2237d830783b58502ad4d1](https://ccip.chain.link/#/side-drawer/msg/0xd6349d3020871e8b6ae64be262732788fd0aeb5a8d2237d830783b58502ad4d1)

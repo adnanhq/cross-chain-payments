@@ -6,7 +6,7 @@ import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.s
 import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {IBridgeAdapter} from "./interfaces/IBridgeAdapter.sol";
 import {IExecutor} from "./interfaces/IExecutor.sol";
-import {Ownable} from "./utils/Ownable.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {
     IERC20
 } from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
@@ -45,7 +45,7 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
     event SenderAllowed(uint64 indexed chainSelector, address indexed sender, bool allowed);
     event RefundSent(bytes32 indexed messageId, uint64 destinationChainSelector, address recipient, uint256 amount);
 
-    constructor(address _router, address _executor) CCIPReceiver(_router) {
+    constructor(address _router, address _executor) CCIPReceiver(_router) Ownable(msg.sender) {
         executor = IExecutor(_executor);
     }
 
@@ -164,8 +164,6 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
             extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: 200_000}))
         });
     }
-
-    // Admin functions (simplified for PoC - no access control)
 
     /**
      * @notice Allow or disallow a sender from a source chain

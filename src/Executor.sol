@@ -5,7 +5,7 @@ import {IExecutor} from "./interfaces/IExecutor.sol";
 import {IBridgeAdapter} from "./interfaces/IBridgeAdapter.sol";
 import {ICrossChainRegistry} from "./interfaces/ICrossChainRegistry.sol";
 import {ISimpleFundReceiver} from "./interfaces/ISimpleFundReceiver.sol";
-import {Ownable} from "./utils/Ownable.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {
     IERC20
 } from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
@@ -64,16 +64,24 @@ contract Executor is IExecutor, Ownable {
     error TransferFailed();
 
     modifier onlyBridgeAdapter() {
-        if (!authorizedAdapters[msg.sender]) revert Unauthorized();
+        _onlyBridgeAdapter();
         _;
     }
 
     modifier whenNotPaused() {
-        if (isPaused) revert ExecutorPaused();
+        _whenNotPaused();
         _;
     }
 
-    constructor(address _registry) {
+    function _onlyBridgeAdapter() internal view {
+        if (!authorizedAdapters[msg.sender]) revert Unauthorized();
+    }
+
+    function _whenNotPaused() internal view {
+        if (isPaused) revert ExecutorPaused();
+    }
+
+    constructor(address _registry) Ownable(msg.sender) {
         registry = ICrossChainRegistry(_registry);
     }
 

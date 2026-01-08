@@ -3,7 +3,7 @@ pragma solidity ^0.8.22;
 
 import {IExecutor} from "./interfaces/IExecutor.sol";
 import {ISimpleFundReceiver} from "./interfaces/ISimpleFundReceiver.sol";
-import {Ownable} from "./utils/Ownable.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {
     IERC20
 } from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
@@ -54,7 +54,7 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
     );
     event RefundInitiated(bytes32 indexed intentId, address token, uint256 amount, address recipient);
 
-    constructor(address _executor) {
+    constructor(address _executor) Ownable(msg.sender) {
         executor = _executor;
     }
 
