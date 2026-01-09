@@ -81,7 +81,6 @@ contract CCIPSender {
         IERC20(sourceToken).safeTransferFrom(msg.sender, address(this), intent.amount);
 
         // Approve ROUTER to spend tokens
-        IERC20(sourceToken).safeApprove(address(ROUTER), 0);
         IERC20(sourceToken).safeApprove(address(ROUTER), intent.amount);
 
         // Build the CCIP message
