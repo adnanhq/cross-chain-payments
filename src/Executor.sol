@@ -6,12 +6,8 @@ import {IBridgeAdapter} from "./interfaces/IBridgeAdapter.sol";
 import {ICrossChainRegistry} from "./interfaces/ICrossChainRegistry.sol";
 import {ISimpleFundReceiver} from "./interfaces/ISimpleFundReceiver.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {
-    IERC20
-} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
-import {
-    SafeERC20
-} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title Executor
@@ -197,8 +193,7 @@ contract Executor is IExecutor, Ownable {
         intents[intentId].status = IntentStatus.Refunded;
 
         // Approve adapter to spend tokens
-        IERC20(request.token).safeApprove(adapter, 0);
-        IERC20(request.token).safeApprove(adapter, request.amount);
+        IERC20(request.token).forceApprove(adapter, request.amount);
 
         // Send refund via bridge
         refundId = IBridgeAdapter(adapter).sendRefund{value: msg.value}(
@@ -206,7 +201,7 @@ contract Executor is IExecutor, Ownable {
         );
 
         // Reset approval
-        IERC20(request.token).safeApprove(adapter, 0);
+        IERC20(request.token).forceApprove(adapter, 0);
 
         emit RefundExecuted(intentId, refundId);
     }

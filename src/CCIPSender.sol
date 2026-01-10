@@ -4,12 +4,8 @@ pragma solidity ^0.8.22;
 import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {IExecutor} from "./interfaces/IExecutor.sol";
-import {
-    IERC20
-} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
-import {
-    SafeERC20
-} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title CCIPSender
@@ -81,7 +77,7 @@ contract CCIPSender {
         IERC20(sourceToken).safeTransferFrom(msg.sender, address(this), intent.amount);
 
         // Approve ROUTER to spend tokens
-        IERC20(sourceToken).safeApprove(address(ROUTER), intent.amount);
+        IERC20(sourceToken).forceApprove(address(ROUTER), intent.amount);
 
         // Build the CCIP message
         Client.EVM2AnyMessage memory ccipMessage = _buildMessage(destinationAdapter, sourceToken, sanitizedIntent);

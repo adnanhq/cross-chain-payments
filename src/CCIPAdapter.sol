@@ -7,12 +7,8 @@ import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/
 import {IBridgeAdapter} from "./interfaces/IBridgeAdapter.sol";
 import {IExecutor} from "./interfaces/IExecutor.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {
-    IERC20
-} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
-import {
-    SafeERC20
-} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title CCIPAdapter
@@ -121,7 +117,7 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         IRouterClient router = IRouterClient(getRouter());
 
         // Approve router to spend tokens
-        IERC20(token).safeApprove(address(router), amount);
+        IERC20(token).forceApprove(address(router), amount);
 
         // Send the message
         messageId = router.ccipSend{value: msg.value}(destinationChainSelector, ccipMessage);

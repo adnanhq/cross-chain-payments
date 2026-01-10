@@ -4,12 +4,8 @@ pragma solidity ^0.8.22;
 import {IExecutor} from "./interfaces/IExecutor.sol";
 import {ISimpleFundReceiver} from "./interfaces/ISimpleFundReceiver.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {
-    IERC20
-} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
-import {
-    SafeERC20
-} from "@chainlink/contracts-ccip/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title SimpleFundReceiver
