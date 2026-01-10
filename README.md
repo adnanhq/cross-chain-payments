@@ -102,7 +102,7 @@ forge script script/SendIntent.s.sol \
 
 - `SOURCE_CHAIN_SELECTOR` / `DEST_CHAIN_SELECTOR` are **CCIP chain selectors**, not EVM `chainId`.
 - Destination-side intent semantics:
-  - `intent.token` is the **destination-chain** ERC20 expected to be delivered
+  - `intent.destinationToken` is the **destination-chain** ERC20 expected to be delivered
   - `SOURCE_TOKEN` is the **source-chain** ERC20 that CCIP bridges
 
 Router addresses and chain selectors: https://docs.chain.link/ccip/directory

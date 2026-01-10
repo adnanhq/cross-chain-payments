@@ -34,7 +34,7 @@ interface IExecutor {
         bytes32 intentId;
         uint64 sourceChainSelector;
         address sender;
-        address token;
+        address destinationToken;
         uint256 amount;
         address receiver;
         IntentKind kind;
@@ -43,12 +43,12 @@ interface IExecutor {
     }
 
     /// @notice Refund request created by the treasury at refund time
-    /// @param token Token to refund (destination chain token)
+    /// @param destinationToken Token to refund (destination chain token)
     /// @param amount Amount to refund
     /// @param recipient Recipient on source chain
     /// @param sourceChainSelector Source chain selector for routing
     struct RefundRequest {
-        address token;
+        address destinationToken;
         uint256 amount;
         address recipient;
         uint64 sourceChainSelector;
@@ -61,10 +61,10 @@ interface IExecutor {
 
     /// @notice Called by the fund receiver to request a refund back to source chain
     /// @param intentId The intent ID to refund
-    /// @param token Token to refund
+    /// @param destinationToken Token to refund
     /// @param amount Amount to refund
     /// @param recipient Recipient on source chain
-    function requestRefund(bytes32 intentId, address token, uint256 amount, address recipient) external;
+    function requestRefund(bytes32 intentId, address destinationToken, uint256 amount, address recipient) external;
 
     /// @notice Execute a pending refund by bridging tokens back to source chain
     /// @param intentId The intent ID to refund

@@ -6,6 +6,7 @@ import {IBridgeAdapter} from "./interfaces/IBridgeAdapter.sol";
 import {ICrossChainRegistry} from "./interfaces/ICrossChainRegistry.sol";
 import {ISimpleFundReceiver} from "./interfaces/ISimpleFundReceiver.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -14,14 +15,11 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * @notice Central executor that receives bridged assets and executes payments on fund receivers
  * @dev Simplified PoC version - no EIP-712 signature verification
  */
-contract Executor is IExecutor, Ownable {
+contract Executor is IExecutor, Ownable, Pausable {
     using SafeERC20 for IERC20;
 
     /// @notice Bridge identifier for CCIP
     bytes32 public constant BRIDGE_ID_CCIP = keccak256("CCIP");
-
-    /// @notice Global pause flag
-    bool public isPaused;
 
     /// @notice Registry for chain/adapter configuration
     ICrossChainRegistry public registry;
@@ -31,7 +29,7 @@ contract Executor is IExecutor, Ownable {
         IntentStatus status;
         uint64 sourceChainSelector;
         bytes32 bridgeId;
-        address token;
+        address destinationToken;
         uint256 escrowedAmount;
         address sender;
         address receiver;
@@ -47,34 +45,24 @@ contract Executor is IExecutor, Ownable {
     mapping(address => bool) public authorizedAdapters;
 
     // Errors
-    error Unauthorized();
-    error ExecutorPaused();
-    error IntentAlreadyProcessed();
-    error IntentExpired();
-    error ChainNotSupported();
-    error AdapterMismatch();
-    error InvalidReceiver();
-    error InvalidAmount();
-    error RefundNotRequested();
-    error InsufficientFee();
-    error TransferFailed();
+    error Executor__Unauthorized();
+    error Executor__IntentAlreadyProcessed();
+    error Executor__IntentExpired();
+    error Executor__ChainNotSupported();
+    error Executor__AdapterMismatch();
+    error Executor__InvalidReceiver();
+    error Executor__InvalidAmount();
+    error Executor__RefundNotRequested();
+    error Executor__InsufficientFee();
+    error Executor__TransferFailed();
 
     modifier onlyBridgeAdapter() {
         _onlyBridgeAdapter();
         _;
     }
 
-    modifier whenNotPaused() {
-        _whenNotPaused();
-        _;
-    }
-
     function _onlyBridgeAdapter() internal view {
-        if (!authorizedAdapters[msg.sender]) revert Unauthorized();
-    }
-
-    function _whenNotPaused() internal view {
-        if (isPaused) revert ExecutorPaused();
+        if (!authorizedAdapters[msg.sender]) revert Executor__Unauthorized();
     }
 
     constructor(address _registry) Ownable(msg.sender) {
@@ -89,34 +77,34 @@ contract Executor is IExecutor, Ownable {
     {
         // Check intent hasn't been processed
         if (intents[intent.intentId].status != IntentStatus.Unseen) {
-            revert IntentAlreadyProcessed();
+            revert Executor__IntentAlreadyProcessed();
         }
 
         // Check deadline
         if (block.timestamp > intent.deadline) {
-            revert IntentExpired();
+            revert Executor__IntentExpired();
         }
 
         // Check chain is supported
         ICrossChainRegistry.ChainConfig memory config = registry.getChainConfig(intent.sourceChainSelector);
         if (!config.isSupported || config.isPaused) {
-            revert ChainNotSupported();
+            revert Executor__ChainNotSupported();
         }
 
         // Verify adapter integrity
         (address expectedAdapter, bool enabled) = registry.getBridgeAdapter(intent.sourceChainSelector, bridgeId);
         if (!enabled || expectedAdapter != msg.sender) {
-            revert AdapterMismatch();
+            revert Executor__AdapterMismatch();
         }
 
         // Validate receiver
         if (intent.receiver == address(0)) {
-            revert InvalidReceiver();
+            revert Executor__InvalidReceiver();
         }
 
         // Validate amount
         if (intent.amount == 0) {
-            revert InvalidAmount();
+            revert Executor__InvalidAmount();
         }
 
         // Record the intent (acts as reentrancy guard for this intentId)
@@ -124,7 +112,7 @@ contract Executor is IExecutor, Ownable {
             status: IntentStatus.Executed,
             sourceChainSelector: intent.sourceChainSelector,
             bridgeId: bridgeId,
-            token: intent.token,
+            destinationToken: intent.destinationToken,
             escrowedAmount: intent.amount,
             sender: intent.sender,
             receiver: intent.receiver
@@ -132,27 +120,28 @@ contract Executor is IExecutor, Ownable {
 
         // Transfer tokens from executor to the receiver
         // The adapter has already transferred tokens to this contract
-        IERC20(intent.token).safeTransfer(intent.receiver, intent.amount);
+        IERC20(intent.destinationToken).safeTransfer(intent.receiver, intent.amount);
 
         // Call the receiver to process the payment
-        ISimpleFundReceiver(intent.receiver)
-            .processPayment(intent.intentId, intent.sender, intent.token, intent.amount, intent.data);
+        ISimpleFundReceiver(intent.receiver).processPayment(
+            intent.intentId, intent.sender, intent.destinationToken, intent.amount, intent.data
+        );
 
-        emit IntentExecuted(intent.intentId, intent.sender, intent.token, intent.amount, intent.receiver);
+        emit IntentExecuted(intent.intentId, intent.sender, intent.destinationToken, intent.amount, intent.receiver);
     }
 
     /// @inheritdoc IExecutor
-    function requestRefund(bytes32 intentId, address token, uint256 amount, address recipient) external {
+    function requestRefund(bytes32 intentId, address destinationToken, uint256 amount, address recipient) external {
         IntentRecord storage record = intents[intentId];
 
         // Verify caller is the receiver that executed this intent
         if (msg.sender != record.receiver) {
-            revert Unauthorized();
+            revert Executor__Unauthorized();
         }
 
         // Verify intent was executed
         if (record.status != IntentStatus.Executed) {
-            revert InvalidAmount();
+            revert Executor__InvalidAmount();
         }
 
         // Update status
@@ -160,10 +149,13 @@ contract Executor is IExecutor, Ownable {
 
         // Store refund request
         refundRequests[intentId] = RefundRequest({
-            token: token, amount: amount, recipient: recipient, sourceChainSelector: record.sourceChainSelector
+            destinationToken: destinationToken,
+            amount: amount,
+            recipient: recipient,
+            sourceChainSelector: record.sourceChainSelector
         });
 
-        emit RefundRequested(intentId, token, amount, recipient);
+        emit RefundRequested(intentId, destinationToken, amount, recipient);
     }
 
     /// @inheritdoc IExecutor
@@ -173,35 +165,36 @@ contract Executor is IExecutor, Ownable {
 
         // Verify refund was requested
         if (record.status != IntentStatus.RefundRequested) {
-            revert RefundNotRequested();
+            revert Executor__RefundNotRequested();
         }
 
         // Get the adapter for this bridge
         (address adapter, bool enabled) = registry.getBridgeAdapter(record.sourceChainSelector, record.bridgeId);
         if (!enabled) {
-            revert AdapterMismatch();
+            revert Executor__AdapterMismatch();
         }
 
         // Check fee
-        uint256 requiredFee =
-            IBridgeAdapter(adapter).quoteRefundFee(request.sourceChainSelector, request.token, request.amount);
+        uint256 requiredFee = IBridgeAdapter(adapter).quoteRefundFee(
+            request.sourceChainSelector, request.destinationToken, request.amount
+        );
         if (msg.value < requiredFee) {
-            revert InsufficientFee();
+            revert Executor__InsufficientFee();
         }
 
         // Update status
         intents[intentId].status = IntentStatus.Refunded;
 
         // Approve adapter to spend tokens
-        IERC20(request.token).forceApprove(adapter, request.amount);
+        IERC20(request.destinationToken).forceApprove(adapter, request.amount);
 
         // Send refund via bridge
         refundId = IBridgeAdapter(adapter).sendRefund{value: msg.value}(
-            request.sourceChainSelector, request.recipient, request.token, request.amount
+            request.sourceChainSelector, request.recipient, request.destinationToken, request.amount
         );
 
         // Reset approval
-        IERC20(request.token).forceApprove(adapter, 0);
+        IERC20(request.destinationToken).forceApprove(adapter, 0);
 
         emit RefundExecuted(intentId, refundId);
     }
@@ -226,12 +219,12 @@ contract Executor is IExecutor, Ownable {
 
     /// @notice Pause the executor
     function pause() external onlyOwner {
-        isPaused = true;
+        _pause();
     }
 
     /// @notice Unpause the executor
     function unpause() external onlyOwner {
-        isPaused = false;
+        _unpause();
     }
 
     /// @notice Update the registry

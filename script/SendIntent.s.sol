@@ -28,7 +28,7 @@ contract SendIntent is Script {
             intentId: intentId,
             sourceChainSelector: sourceChainSelector, // CCIP chain selector of the source chain
             sender: msg.sender, // will be bound again in CCIPSender for safety
-            token: destToken, // destination-chain token expected to be delivered by CCIP
+            destinationToken: destToken, // destination-chain token expected to be delivered by CCIP
             amount: amount,
             receiver: destReceiver,
             kind: IExecutor.IntentKind.Payment,

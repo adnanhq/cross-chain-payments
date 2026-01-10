@@ -19,9 +19,10 @@ contract CCIPSender {
     IRouterClient public immutable ROUTER;
 
     // Errors
-    error InvalidAmount();
-    error InsufficientFee();
-    error UnsupportedChain();
+    error CCIPSender__InvalidAmount();
+    error CCIPSender__InsufficientFee();
+    error CCIPSender__UnsupportedChain();
+    error CCIPSender__FeeRefundFailed();
 
     // Events
     event IntentSent(
@@ -30,7 +31,7 @@ contract CCIPSender {
         uint64 destinationChainSelector,
         address sender,
         address sourceToken,
-        address destToken,
+        address destinationToken,
         uint256 amount
     );
 
@@ -53,11 +54,11 @@ contract CCIPSender {
         IExecutor.CrossChainIntent calldata intent
     ) external payable returns (bytes32 messageId) {
         // Validate amount
-        if (intent.amount == 0) revert InvalidAmount();
+        if (intent.amount == 0) revert CCIPSender__InvalidAmount();
 
         // Check chain is supported
         if (!ROUTER.isChainSupported(destinationChainSelector)) {
-            revert UnsupportedChain();
+            revert CCIPSender__UnsupportedChain();
         }
 
         // Bind sender to the caller (matches production semantics where the sender is authenticated)
@@ -65,7 +66,7 @@ contract CCIPSender {
             intentId: intent.intentId,
             sourceChainSelector: intent.sourceChainSelector,
             sender: msg.sender,
-            token: intent.token, // destination token address (expected on destination chain)
+            destinationToken: intent.destinationToken, 
             amount: intent.amount,
             receiver: intent.receiver,
             kind: intent.kind,
@@ -73,18 +74,18 @@ contract CCIPSender {
             deadline: intent.deadline
         });
 
+        // Build the CCIP message
+        Client.EVM2AnyMessage memory ccipMessage = _buildMessage(destinationAdapter, sourceToken, sanitizedIntent);
+
+        // Get fee and validate payment
+        uint256 fee = ROUTER.getFee(destinationChainSelector, ccipMessage);
+        if (msg.value < fee) revert CCIPSender__InsufficientFee();
+
         // Transfer tokens from sender to this contract
         IERC20(sourceToken).safeTransferFrom(msg.sender, address(this), intent.amount);
 
         // Approve ROUTER to spend tokens
         IERC20(sourceToken).forceApprove(address(ROUTER), intent.amount);
-
-        // Build the CCIP message
-        Client.EVM2AnyMessage memory ccipMessage = _buildMessage(destinationAdapter, sourceToken, sanitizedIntent);
-
-        // Get fee
-        uint256 fee = ROUTER.getFee(destinationChainSelector, ccipMessage);
-        if (msg.value < fee) revert InsufficientFee();
 
         // Send the message
         messageId = ROUTER.ccipSend{value: fee}(destinationChainSelector, ccipMessage);
@@ -92,11 +93,17 @@ contract CCIPSender {
         // Refund excess fee
         if (msg.value > fee) {
             (bool success,) = msg.sender.call{value: msg.value - fee}("");
-            require(success, "Refund failed");
+            if (!success) revert CCIPSender__FeeRefundFailed();
         }
 
         emit IntentSent(
-            messageId, intent.intentId, destinationChainSelector, msg.sender, sourceToken, intent.token, intent.amount
+            messageId,
+            intent.intentId,
+            destinationChainSelector,
+            msg.sender,
+            sourceToken,
+            intent.destinationToken,
+            intent.amount
         );
     }
 
@@ -118,7 +125,7 @@ contract CCIPSender {
             intentId: intent.intentId,
             sourceChainSelector: intent.sourceChainSelector,
             sender: msg.sender,
-            token: intent.token,
+            destinationToken: intent.destinationToken,
             amount: intent.amount,
             receiver: intent.receiver,
             kind: intent.kind,
@@ -127,14 +134,14 @@ contract CCIPSender {
         });
 
         Client.EVM2AnyMessage memory ccipMessage = _buildMessage(destinationAdapter, sourceToken, sanitizedIntent);
-        return ROUTER.getFee(destinationChainSelector, ccipMessage);
+        fee = ROUTER.getFee(destinationChainSelector, ccipMessage);
     }
 
     /**
      * @notice Build a CCIP message for an intent
      */
     function _buildMessage(address destinationAdapter, address sourceToken, IExecutor.CrossChainIntent memory intent)
-        internal
+        private
         pure
         returns (Client.EVM2AnyMessage memory)
     {
@@ -142,13 +149,10 @@ contract CCIPSender {
         Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](1);
         tokenAmounts[0] = Client.EVMTokenAmount({token: sourceToken, amount: intent.amount});
 
-        // Encode the intent as message data
-        bytes memory data = abi.encode(intent);
-
         // Build message
         return Client.EVM2AnyMessage({
             receiver: abi.encode(destinationAdapter),
-            data: data,
+            data: abi.encode(intent),
             tokenAmounts: tokenAmounts,
             feeToken: address(0), // Pay in native
             extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: 500_000}))

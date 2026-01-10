@@ -28,14 +28,13 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
     mapping(uint64 => mapping(address => bool)) public allowedSenders;
 
     // Errors
-    error Unauthorized();
-    error InvalidSender();
-    error NoTokensReceived();
-    error UnexpectedTokenCount();
-    error TokenMismatch();
-    error AmountMismatch();
-    error SourceChainMismatch();
-    error InvalidReceiver();
+    error CCIPAdapter__Unauthorized();
+    error CCIPAdapter__InvalidSender();
+    error CCIPAdapter__UnexpectedTokenCount();
+    error CCIPAdapter__TokenMismatch();
+    error CCIPAdapter__AmountMismatch();
+    error CCIPAdapter__SourceChainMismatch();
+    error CCIPAdapter__InvalidReceiver();
 
     // Events
     event SenderAllowed(uint64 indexed chainSelector, address indexed sender, bool allowed);
@@ -55,12 +54,11 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
 
         // Validate sender is allowed
         if (!allowedSenders[message.sourceChainSelector][sourceSender]) {
-            revert InvalidSender();
+            revert CCIPAdapter__InvalidSender();
         }
 
         // Ensure we received exactly one token (PoC only supports single-token intents)
-        if (message.destTokenAmounts.length == 0) revert NoTokensReceived();
-        if (message.destTokenAmounts.length != 1) revert UnexpectedTokenCount();
+        if (message.destTokenAmounts.length != 1) revert CCIPAdapter__UnexpectedTokenCount();
 
         // Get the token and amount received
         address receivedToken = message.destTokenAmounts[0].token;
@@ -71,20 +69,20 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
 
         // Bind intent source chain selector to the CCIP message provenance
         if (intent.sourceChainSelector != message.sourceChainSelector) {
-            revert SourceChainMismatch();
+            revert CCIPAdapter__SourceChainMismatch();
         }
 
         // Receiver must be set
-        if (intent.receiver == address(0)) revert InvalidReceiver();
+        if (intent.receiver == address(0)) revert CCIPAdapter__InvalidReceiver();
 
         // Verify token matches
-        if (intent.token != receivedToken) {
-            revert TokenMismatch();
+        if (intent.destinationToken != receivedToken) {
+            revert CCIPAdapter__TokenMismatch();
         }
 
         // Verify amount matches what was actually delivered
         if (intent.amount != receivedAmount) {
-            revert AmountMismatch();
+            revert CCIPAdapter__AmountMismatch();
         }
 
         // Transfer tokens to executor
@@ -104,7 +102,7 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         returns (bytes32 messageId)
     {
         // Only executor can send refunds
-        if (msg.sender != address(executor)) revert Unauthorized();
+        if (msg.sender != address(executor)) revert CCIPAdapter__Unauthorized();
 
         // Transfer tokens from executor to this contract
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);

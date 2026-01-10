@@ -38,11 +38,11 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
     bool public refundsEnabled;
 
     // Errors
-    error Unauthorized();
-    error PaymentNotFound();
-    error AlreadyRefunded();
-    error RefundsNotEnabled();
-    error InsufficientBalance();
+    error SimpleFundReceiver__Unauthorized();
+    error SimpleFundReceiver__PaymentNotFound();
+    error SimpleFundReceiver__AlreadyRefunded();
+    error SimpleFundReceiver__RefundsNotEnabled();
+    error SimpleFundReceiver__InsufficientBalance();
 
     // Events
     event PaymentReceived(
@@ -60,7 +60,7 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
      * @dev Called by Executor after validating the intent
      */
     function processPayment(bytes32 intentId, address sender, address token, uint256 amount, bytes calldata) external {
-        if (msg.sender != executor) revert Unauthorized();
+        if (msg.sender != executor) revert SimpleFundReceiver__Unauthorized();
 
         // Record the payment
         payments[intentId] = Payment({
@@ -87,17 +87,17 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
         Payment memory payment = payments[intentId];
 
         // Verify payment exists
-        if (payment.amount == 0) revert PaymentNotFound();
+        if (payment.amount == 0) revert SimpleFundReceiver__PaymentNotFound();
 
         // Check not already refunded
-        if (payment.refunded) revert AlreadyRefunded();
+        if (payment.refunded) revert SimpleFundReceiver__AlreadyRefunded();
 
         // Check refunds are enabled (simulating campaign failure/cancellation)
-        if (!refundsEnabled) revert RefundsNotEnabled();
+        if (!refundsEnabled) revert SimpleFundReceiver__RefundsNotEnabled();
 
         // Check we have enough balance
         uint256 balance = IERC20(payment.token).balanceOf(address(this));
-        if (balance < payment.amount) revert InsufficientBalance();
+        if (balance < payment.amount) revert SimpleFundReceiver__InsufficientBalance();
 
         // Mark as refunded
         payments[intentId].refunded = true;
