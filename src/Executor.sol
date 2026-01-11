@@ -206,9 +206,7 @@ contract Executor is IExecutor, Ownable, Pausable {
     function getRefundRequest(bytes32 intentId) external view returns (RefundRequest memory) {
         return refundRequests[intentId];
     }
-
-    // Admin functions (simplified for PoC - no access control)
-
+    
     /// @notice Authorize or deauthorize a bridge adapter
     function setAdapterAuthorization(address adapter, bool authorized) external onlyOwner {
         authorizedAdapters[adapter] = authorized;

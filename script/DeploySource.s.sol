@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import {Script, console} from "forge-std/Script.sol";
-import {CCIPSender} from "../src/CCIPSender.sol";
+import {IntentSender} from "../src/IntentSender.sol";
 
 contract DeploySource is Script {
     function run() external {
@@ -10,8 +10,8 @@ contract DeploySource is Script {
 
         vm.startBroadcast();
 
-        CCIPSender sender = new CCIPSender(ccipRouter);
-        console.log("CCIPSender:", address(sender));
+        IntentSender sender = new IntentSender(ccipRouter);
+        console.log("IntentSender:", address(sender));
 
         vm.stopBroadcast();
     }

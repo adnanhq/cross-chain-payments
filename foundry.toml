@@ -6,7 +6,10 @@ libs = ["lib"]
 remappings = [
     "@chainlink/contracts-ccip/=lib/ccip/contracts/",
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
-    "forge-std/=lib/forge-std/src/"
+    "forge-std/=lib/forge-std/src/",
+    "@layerzerolabs/lz-evm-oapp-v2/=lib/LayerZero-v2/packages/layerzero-v2/evm/oapp/",
+    "@layerzerolabs/lz-evm-protocol-v2/=lib/LayerZero-v2/packages/layerzero-v2/evm/protocol/",
+    "@stargate-v2/=lib/stargate-v2/packages/stg-evm-v2/src/"
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

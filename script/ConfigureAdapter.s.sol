@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import {Script, console} from "forge-std/Script.sol";
-import {CCIPAdapter} from "../src/CCIPAdapter.sol";
+import {ChainlinkCCIPAdapter} from "../src/bridges/ChainlinkCCIPAdapter.sol";
 
 contract ConfigureAdapter is Script {
     function run() external {
@@ -12,7 +12,7 @@ contract ConfigureAdapter is Script {
 
         vm.startBroadcast();
 
-        CCIPAdapter adapter = CCIPAdapter(payable(adapterAddress));
+        ChainlinkCCIPAdapter adapter = ChainlinkCCIPAdapter(payable(adapterAddress));
         adapter.setAllowedSender(sourceChainSelector, sourceSender, true);
 
         vm.stopBroadcast();

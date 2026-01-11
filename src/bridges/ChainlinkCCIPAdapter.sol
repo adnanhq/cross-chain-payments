@@ -4,18 +4,18 @@ pragma solidity ^0.8.22;
 import {CCIPReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/applications/CCIPReceiver.sol";
 import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
-import {IBridgeAdapter} from "./interfaces/IBridgeAdapter.sol";
-import {IExecutor} from "./interfaces/IExecutor.sol";
+import {IBridgeAdapter} from "../interfaces/IBridgeAdapter.sol";
+import {IExecutor} from "../interfaces/IExecutor.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
- * @title CCIPAdapter
+ * @title ChainlinkCCIPAdapter
  * @notice Chainlink CCIP adapter for receiving cross-chain messages and sending refunds
  * @dev Implements CCIPReceiver for incoming messages and IBridgeAdapter for outgoing refunds
  */
-contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
+contract ChainlinkCCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
     using SafeERC20 for IERC20;
 
     /// @notice Bridge identifier
@@ -27,20 +27,30 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
     /// @notice Allowed source chain senders: chainSelector => sender => allowed
     mapping(uint64 => mapping(address => bool)) public allowedSenders;
 
-    // Errors
-    error CCIPAdapter__Unauthorized();
-    error CCIPAdapter__InvalidSender();
-    error CCIPAdapter__UnexpectedTokenCount();
-    error CCIPAdapter__TokenMismatch();
-    error CCIPAdapter__AmountMismatch();
+    /*//////////////////////////////////////////////////////////////
+                                  ERRORS
+    //////////////////////////////////////////////////////////////*/
 
-    // Events
+    error ChainlinkCCIPAdapter__Unauthorized();
+    error ChainlinkCCIPAdapter__InvalidSender();
+    error ChainlinkCCIPAdapter__UnexpectedTokenCount();
+    error ChainlinkCCIPAdapter__TokenMismatch();
+    error ChainlinkCCIPAdapter__AmountMismatch();
+
+    /*//////////////////////////////////////////////////////////////
+                                  EVENTS
+    //////////////////////////////////////////////////////////////*/
+
     event SenderAllowed(uint64 indexed chainSelector, address indexed sender, bool allowed);
     event RefundSent(bytes32 indexed messageId, uint64 destinationChainSelector, address recipient, uint256 amount);
 
     constructor(address _router, address _executor) CCIPReceiver(_router) Ownable(msg.sender) {
         executor = IExecutor(_executor);
     }
+
+    /*//////////////////////////////////////////////////////////////
+                              CCIP RECEIVE
+    //////////////////////////////////////////////////////////////*/
 
     /**
      * @notice Handle incoming CCIP messages
@@ -51,12 +61,10 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         address sourceSender = abi.decode(message.sender, (address));
 
         // Validate sender is allowed
-        if (!allowedSenders[message.sourceChainSelector][sourceSender]) {
-            revert CCIPAdapter__InvalidSender();
-        }
+        if (!allowedSenders[message.sourceChainSelector][sourceSender]) revert ChainlinkCCIPAdapter__InvalidSender();
 
         // Ensure we received exactly one token (PoC only supports single-token intents)
-        if (message.destTokenAmounts.length != 1) revert CCIPAdapter__UnexpectedTokenCount();
+        if (message.destTokenAmounts.length != 1) revert ChainlinkCCIPAdapter__UnexpectedTokenCount();
 
         // Get the token and amount received
         address receivedToken = message.destTokenAmounts[0].token;
@@ -69,14 +77,10 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         intent.sourceChainSelector = message.sourceChainSelector;
 
         // Verify token matches
-        if (intent.destinationToken != receivedToken) {
-            revert CCIPAdapter__TokenMismatch();
-        }
+        if (intent.destinationToken != receivedToken) revert ChainlinkCCIPAdapter__TokenMismatch();
 
         // Verify amount matches what was actually delivered
-        if (intent.amount != receivedAmount) {
-            revert CCIPAdapter__AmountMismatch();
-        }
+        if (intent.amount != receivedAmount) revert ChainlinkCCIPAdapter__AmountMismatch();
 
         // Transfer tokens to executor
         IERC20(receivedToken).safeTransfer(address(executor), receivedAmount);
@@ -84,6 +88,10 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         // Call executor to process the intent
         executor.executeIntent(BRIDGE_ID, intent);
     }
+
+    /*//////////////////////////////////////////////////////////////
+                        REFUNDS (IBridgeAdapter)
+    //////////////////////////////////////////////////////////////*/
 
     /**
      * @inheritdoc IBridgeAdapter
@@ -95,7 +103,7 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         returns (bytes32 messageId)
     {
         // Only executor can send refunds
-        if (msg.sender != address(executor)) revert CCIPAdapter__Unauthorized();
+        if (msg.sender != address(executor)) revert ChainlinkCCIPAdapter__Unauthorized();
 
         // Transfer tokens from executor to this contract
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
@@ -129,6 +137,10 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
             _buildRefundMessage(destinationChainSelector, address(0), token, amount);
         return IRouterClient(getRouter()).getFee(destinationChainSelector, ccipMessage);
     }
+
+    /*//////////////////////////////////////////////////////////////
+                               ADMIN CONFIG
+    //////////////////////////////////////////////////////////////*/
 
     /**
      * @notice Build a CCIP message for refund
@@ -169,3 +181,5 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
 
     receive() external payable {}
 }
+
+

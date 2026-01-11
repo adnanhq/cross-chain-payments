@@ -1,6 +1,6 @@
 # Cross-Chain Payment PoC
 
-A proof-of-concept for cross-chain payments using Chainlink CCIP.
+A proof-of-concept for cross-chain payments using **Chainlink CCIP** and **LayerZero v2 + Stargate v2**.
 
 ## Build
 
@@ -12,7 +12,9 @@ forge build
 
 ### Prerequisites
 
-1. Pick a **source chain** (where the user pays) and a **destination chain** (where funds are received/executed). Both must be supported by CCIP.
+1. Pick a **source chain** (where the user pays) and a **destination chain** (where funds are received/executed).
+   - For CCIP flows: both must be supported by CCIP.
+   - For LayerZero/Stargate flows: both must be supported by LayerZero v2 + Stargate v2.
 
 2. Get native gas tokens on both chains (for deployment + transactions).
 
@@ -32,8 +34,14 @@ forge build
 ```bash
 export CCIP_ROUTER=<dest_chain_ccip_router>
 export SOURCE_CHAIN_SELECTOR=<source_chain_ccip_selector>
-# Optional: if you already know the source sender contract, you can set it during deployment:
-# export SOURCE_SENDER=<source_chain_ccip_sender_contract_address>
+# Optional: if you already know the source sender contract (IntentSender), you can set it during deployment:
+# export SOURCE_SENDER=<source_chain_intent_sender_address>
+
+# Optional (LayerZero/Stargate): deploy + partially configure the LayerZero adapter during destination deployment
+# export LZ_ENDPOINT_V2=<dest_chain_layerzero_endpoint_v2>
+# export LZ_SOURCE_EID=<source_chain_layerzero_eid>
+# export LZ_DESTINATION_TOKEN=<dest_chain_token_delivered_by_stargate>
+# export LZ_DESTINATION_STARGATE=<dest_chain_stargate_v2_for_that_token>
 
 forge script script/DeployDestination.s.sol \
   --rpc-url $DEST_RPC_URL \
@@ -41,7 +49,7 @@ forge script script/DeployDestination.s.sol \
   --private-key $PRIVATE_KEY
 ```
 
-Save the output addresses: `Registry`, `Executor`, `Adapter`, `Receiver`
+Save the output addresses: `Registry`, `Executor`, `ChainlinkCCIPAdapter`, `LayerZeroStargateAdapter` (if enabled), `Receiver`
 
 ### Step 2: Deploy on Source Chain
 
@@ -54,11 +62,11 @@ forge script script/DeploySource.s.sol \
   --private-key $PRIVATE_KEY
 ```
 
-Save the output: `CCIPSender`
+Save the output: `IntentSender`
 
 ### Step 3: Configure Adapter
 
-Allow the source chain sender on the destination adapter:
+Allow the source chain sender (`IntentSender`) on the destination **CCIP** adapter:
 
 ```bash
 export ADAPTER=<adapter_address_from_step_1>
@@ -71,17 +79,44 @@ forge script script/ConfigureAdapter.s.sol \
   --private-key $PRIVATE_KEY
 ```
 
-### Step 4: Send a Cross-Chain Payment
+### Step 3b (LayerZero/Stargate): Configure LayerZero Adapter
+
+If you deployed the destination chain before knowing the source `IntentSender`, configure the LayerZero adapter now:
+
+```bash
+export ADAPTER=<layerzero_adapter_address_from_step_1>
+export SOURCE_CHAIN_SELECTOR=<source_chain_selector_used_in_registry>
+export LZ_SOURCE_EID=<source_chain_layerzero_eid>
+export SOURCE_SENDER=<intent_sender_address_from_step_2>
+
+export LZ_DESTINATION_TOKEN=<dest_chain_token_delivered_by_stargate>
+export LZ_DESTINATION_STARGATE=<dest_chain_stargate_v2_for_that_token>
+
+# Optional: if refunds should use a different dstEid than sourceEid:
+# export LZ_DST_EID=<source_chain_layerzero_eid>
+
+forge script script/ConfigureLayerZeroAdapter.s.sol \
+  --rpc-url $DEST_RPC_URL \
+  --broadcast \
+  --private-key $PRIVATE_KEY
+```
+
+### Step 4: Send a Cross-Chain Payment (CCIP or LayerZero)
 
 ```bash
 export SOURCE_CHAIN_SELECTOR=<source_chain_ccip_selector>
 export SOURCE_TOKEN=<source_chain_token_address>
 export DEST_TOKEN=<dest_chain_token_address>      # may differ from SOURCE_TOKEN
-export SENDER=<ccip_sender_contract_address>
+export SENDER=<intent_sender_contract_address>
 export DEST_ADAPTER=<adapter_address>
 export DEST_RECEIVER=<receiver_address>
-export DEST_CHAIN_SELECTOR=<dest_chain_ccip_selector>
 export AMOUNT=<amount_in_token_decimals>
+
+# Choose bridge:
+# - CCIP: BRIDGE=CCIP and set DEST_CHAIN_SELECTOR
+# - LayerZero/Stargate: BRIDGE=LAYERZERO and set STARGATE + DST_EID (+ optional MIN_AMOUNT_LD/LZ_EXTRA_OPTIONS)
+export BRIDGE=CCIP
+export DEST_CHAIN_SELECTOR=<dest_chain_ccip_selector>
 
 forge script script/SendIntent.s.sol \
   --rpc-url $SOURCE_RPC_URL \
@@ -101,9 +136,10 @@ forge script script/SendIntent.s.sol \
 ### Notes
 
 - `SOURCE_CHAIN_SELECTOR` / `DEST_CHAIN_SELECTOR` are **CCIP chain selectors**, not EVM `chainId`.
+- LayerZero uses **endpoint IDs** (EIDs): `LZ_SOURCE_EID` / `DST_EID`.
 - Destination-side intent semantics:
   - `intent.destinationToken` is the **destination-chain** ERC20 expected to be delivered
-  - `SOURCE_TOKEN` is the **source-chain** ERC20 that CCIP bridges
+  - `SOURCE_TOKEN` is the **source-chain** ERC20 that CCIP or Stargate bridges
 
 Router addresses and chain selectors: https://docs.chain.link/ccip/directory
 
