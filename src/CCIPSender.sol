@@ -20,6 +20,7 @@ contract CCIPSender {
 
     // Errors
     error CCIPSender__InvalidAmount();
+    error CCIPSender__InvalidReceiver();
     error CCIPSender__InsufficientFee();
     error CCIPSender__UnsupportedChain();
     error CCIPSender__FeeRefundFailed();
@@ -51,31 +52,24 @@ contract CCIPSender {
         uint64 destinationChainSelector,
         address destinationAdapter,
         address sourceToken,
-        IExecutor.CrossChainIntent calldata intent
+        IExecutor.CrossChainIntent memory intent
     ) external payable returns (bytes32 messageId) {
         // Validate amount
         if (intent.amount == 0) revert CCIPSender__InvalidAmount();
+
+        // Validate receiver
+        if (intent.receiver == address(0)) revert CCIPSender__InvalidReceiver();
 
         // Check chain is supported
         if (!ROUTER.isChainSupported(destinationChainSelector)) {
             revert CCIPSender__UnsupportedChain();
         }
 
-        // Bind sender to the caller (matches production semantics where the sender is authenticated)
-        IExecutor.CrossChainIntent memory sanitizedIntent = IExecutor.CrossChainIntent({
-            intentId: intent.intentId,
-            sourceChainSelector: intent.sourceChainSelector,
-            sender: msg.sender,
-            destinationToken: intent.destinationToken, 
-            amount: intent.amount,
-            receiver: intent.receiver,
-            kind: intent.kind,
-            data: intent.data,
-            deadline: intent.deadline
-        });
+        // Sanitize intent: bind sender to caller (sourceChainSelector populated by destination adapter)
+        intent.sender = msg.sender;
 
         // Build the CCIP message
-        Client.EVM2AnyMessage memory ccipMessage = _buildMessage(destinationAdapter, sourceToken, sanitizedIntent);
+        Client.EVM2AnyMessage memory ccipMessage = _buildMessage(destinationAdapter, sourceToken, intent);
 
         // Get fee and validate payment
         uint256 fee = ROUTER.getFee(destinationChainSelector, ccipMessage);
@@ -119,21 +113,12 @@ contract CCIPSender {
         uint64 destinationChainSelector,
         address destinationAdapter,
         address sourceToken,
-        IExecutor.CrossChainIntent calldata intent
+        IExecutor.CrossChainIntent memory intent
     ) external view returns (uint256 fee) {
-        IExecutor.CrossChainIntent memory sanitizedIntent = IExecutor.CrossChainIntent({
-            intentId: intent.intentId,
-            sourceChainSelector: intent.sourceChainSelector,
-            sender: msg.sender,
-            destinationToken: intent.destinationToken,
-            amount: intent.amount,
-            receiver: intent.receiver,
-            kind: intent.kind,
-            data: intent.data,
-            deadline: intent.deadline
-        });
+        // Sanitize intent for accurate fee quote
+        intent.sender = msg.sender;
 
-        Client.EVM2AnyMessage memory ccipMessage = _buildMessage(destinationAdapter, sourceToken, sanitizedIntent);
+        Client.EVM2AnyMessage memory ccipMessage = _buildMessage(destinationAdapter, sourceToken, intent);
         fee = ROUTER.getFee(destinationChainSelector, ccipMessage);
     }
 
@@ -149,13 +134,13 @@ contract CCIPSender {
         Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](1);
         tokenAmounts[0] = Client.EVMTokenAmount({token: sourceToken, amount: intent.amount});
 
-        // Build message
+        // Build message with out-of-order execution enabled (payments are independent)
         return Client.EVM2AnyMessage({
             receiver: abi.encode(destinationAdapter),
             data: abi.encode(intent),
             tokenAmounts: tokenAmounts,
             feeToken: address(0), // Pay in native
-            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: 500_000}))
+            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV2({gasLimit: 500_000, allowOutOfOrderExecution: true}))
         });
     }
 

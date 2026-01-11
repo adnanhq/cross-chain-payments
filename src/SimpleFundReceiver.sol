@@ -24,8 +24,6 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
         address sender;
         address token;
         uint256 amount;
-        bool refunded;
-        uint256 timestamp;
     }
 
     /// @notice Payments by intentId
@@ -40,7 +38,6 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
     // Errors
     error SimpleFundReceiver__Unauthorized();
     error SimpleFundReceiver__PaymentNotFound();
-    error SimpleFundReceiver__AlreadyRefunded();
     error SimpleFundReceiver__RefundsNotEnabled();
     error SimpleFundReceiver__InsufficientBalance();
 
@@ -64,12 +61,10 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
 
         // Record the payment
         payments[intentId] = Payment({
-            intentId: intentId,
-            sender: sender,
-            token: token,
-            amount: amount,
-            refunded: false,
-            timestamp: block.timestamp
+            intentId: intentId, 
+            sender: sender, 
+            token: token, 
+            amount: amount
         });
 
         // Track totals
@@ -86,11 +81,8 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
     function claimRefund(bytes32 intentId) external {
         Payment memory payment = payments[intentId];
 
-        // Verify payment exists
+        // Verify payment exists (amount == 0 means not found or already refunded/deleted)
         if (payment.amount == 0) revert SimpleFundReceiver__PaymentNotFound();
-
-        // Check not already refunded
-        if (payment.refunded) revert SimpleFundReceiver__AlreadyRefunded();
 
         // Check refunds are enabled (simulating campaign failure/cancellation)
         if (!refundsEnabled) revert SimpleFundReceiver__RefundsNotEnabled();
@@ -99,8 +91,8 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
         uint256 balance = IERC20(payment.token).balanceOf(address(this));
         if (balance < payment.amount) revert SimpleFundReceiver__InsufficientBalance();
 
-        // Mark as refunded
-        payments[intentId].refunded = true;
+        // Delete payment record (prevents double-refund)
+        delete payments[intentId];
 
         // Update totals
         totalReceived[payment.token] -= payment.amount;

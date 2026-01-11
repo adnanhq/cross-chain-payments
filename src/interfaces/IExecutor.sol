@@ -22,9 +22,9 @@ interface IExecutor {
 
     /// @notice Cross-chain payment intent structure
     /// @param intentId Unique identifier (also used as paymentId/pledgeId on destination)
-    /// @param sourceChainSelector Origin chain selector
+    /// @param sourceChainSelector Origin chain selector (set by bridge adapter from message provenance)
     /// @param sender Original sender on source chain
-    /// @param token ERC20 token on destination chain delivered by the bridge
+    /// @param destinationToken ERC20 token on destination chain delivered by the bridge
     /// @param amount Amount delivered (in token decimals)
     /// @param receiver The fund receiver contract on destination
     /// @param kind Payment or Pledge
@@ -56,7 +56,7 @@ interface IExecutor {
 
     /// @notice Called by bridge adapters after assets are delivered to Executor
     /// @param bridgeId Identifier like keccak256("CCIP") used for refund routing
-    /// @param intent The cross-chain intent to execute
+    /// @param intent The cross-chain intent to execute (sourceChainSelector populated by adapter)
     function executeIntent(bytes32 bridgeId, CrossChainIntent calldata intent) external;
 
     /// @notice Called by the fund receiver to request a refund back to source chain

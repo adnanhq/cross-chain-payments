@@ -23,7 +23,7 @@ contract CrossChainRegistry is ICrossChainRegistry, Ownable(msg.sender) {
     /// @inheritdoc ICrossChainRegistry
     function setChainConfig(uint64 chainSelector, ChainConfig calldata config) external onlyOwner {
         _chainConfigs[chainSelector] = config;
-        emit ChainConfigSet(chainSelector, config.isSupported, config.isPaused, config.minAmount, config.maxAmount);
+        emit ChainConfigSet(chainSelector, config.isSupported, config.isPaused);
     }
 
     /// @inheritdoc ICrossChainRegistry

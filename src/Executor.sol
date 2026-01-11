@@ -85,7 +85,7 @@ contract Executor is IExecutor, Ownable, Pausable {
             revert Executor__IntentExpired();
         }
 
-        // Check chain is supported
+        // Check chain is supported (sourceChainSelector set by adapter from bridge provenance)
         ICrossChainRegistry.ChainConfig memory config = registry.getChainConfig(intent.sourceChainSelector);
         if (!config.isSupported || config.isPaused) {
             revert Executor__ChainNotSupported();
@@ -123,9 +123,8 @@ contract Executor is IExecutor, Ownable, Pausable {
         IERC20(intent.destinationToken).safeTransfer(intent.receiver, intent.amount);
 
         // Call the receiver to process the payment
-        ISimpleFundReceiver(intent.receiver).processPayment(
-            intent.intentId, intent.sender, intent.destinationToken, intent.amount, intent.data
-        );
+        ISimpleFundReceiver(intent.receiver)
+            .processPayment(intent.intentId, intent.sender, intent.destinationToken, intent.amount, intent.data);
 
         emit IntentExecuted(intent.intentId, intent.sender, intent.destinationToken, intent.amount, intent.receiver);
     }
@@ -175,9 +174,8 @@ contract Executor is IExecutor, Ownable, Pausable {
         }
 
         // Check fee
-        uint256 requiredFee = IBridgeAdapter(adapter).quoteRefundFee(
-            request.sourceChainSelector, request.destinationToken, request.amount
-        );
+        uint256 requiredFee = IBridgeAdapter(adapter)
+            .quoteRefundFee(request.sourceChainSelector, request.destinationToken, request.amount);
         if (msg.value < requiredFee) {
             revert Executor__InsufficientFee();
         }

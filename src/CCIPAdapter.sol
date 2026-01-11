@@ -33,8 +33,6 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
     error CCIPAdapter__UnexpectedTokenCount();
     error CCIPAdapter__TokenMismatch();
     error CCIPAdapter__AmountMismatch();
-    error CCIPAdapter__SourceChainMismatch();
-    error CCIPAdapter__InvalidReceiver();
 
     // Events
     event SenderAllowed(uint64 indexed chainSelector, address indexed sender, bool allowed);
@@ -67,13 +65,8 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         // Decode the intent from message data
         IExecutor.CrossChainIntent memory intent = abi.decode(message.data, (IExecutor.CrossChainIntent));
 
-        // Bind intent source chain selector to the CCIP message provenance
-        if (intent.sourceChainSelector != message.sourceChainSelector) {
-            revert CCIPAdapter__SourceChainMismatch();
-        }
-
-        // Receiver must be set
-        if (intent.receiver == address(0)) revert CCIPAdapter__InvalidReceiver();
+        // Bind sourceChainSelector from CCIP message provenance (similar to sender sanitization)
+        intent.sourceChainSelector = message.sourceChainSelector;
 
         // Verify token matches
         if (intent.destinationToken != receivedToken) {
@@ -141,7 +134,7 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
      * @notice Build a CCIP message for refund
      */
     function _buildRefundMessage(uint64, address recipient, address token, uint256 amount)
-        internal
+        private
         pure
         returns (Client.EVM2AnyMessage memory)
     {
@@ -155,7 +148,7 @@ contract CCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
             data: "",
             tokenAmounts: tokenAmounts,
             feeToken: address(0), // Pay in native
-            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: 200_000}))
+            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV2({gasLimit: 200_000, allowOutOfOrderExecution: true}))
         });
     }
 

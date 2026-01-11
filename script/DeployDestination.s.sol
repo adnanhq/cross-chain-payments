@@ -29,10 +29,7 @@ contract DeployDestination is Script {
         console.log("SimpleFundReceiver:", address(receiver));
 
         registry.setChainConfig(
-            sourceChainSelector,
-            ICrossChainRegistry.ChainConfig({
-                isSupported: true, isPaused: false, minAmount: 0, maxAmount: type(uint256).max
-            })
+            sourceChainSelector, ICrossChainRegistry.ChainConfig({isSupported: true, isPaused: false})
         );
 
         bytes32 bridgeId = keccak256("CCIP");

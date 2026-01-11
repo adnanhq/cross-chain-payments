@@ -12,7 +12,6 @@ contract SendIntent is Script {
         uint64 destChainSelector = uint64(vm.envUint("DEST_CHAIN_SELECTOR"));
         address destAdapter = vm.envAddress("DEST_ADAPTER");
         address destReceiver = vm.envAddress("DEST_RECEIVER");
-        uint64 sourceChainSelector = uint64(vm.envUint("SOURCE_CHAIN_SELECTOR"));
         address sourceToken = vm.envAddress("SOURCE_TOKEN");
         address destToken = vm.envAddress("DEST_TOKEN");
         uint256 amount = vm.envUint("AMOUNT");
@@ -26,9 +25,9 @@ contract SendIntent is Script {
 
         IExecutor.CrossChainIntent memory intent = IExecutor.CrossChainIntent({
             intentId: intentId,
-            sourceChainSelector: sourceChainSelector, // CCIP chain selector of the source chain
-            sender: msg.sender, // will be bound again in CCIPSender for safety
-            destinationToken: destToken, // destination-chain token expected to be delivered by CCIP
+            sourceChainSelector: 0, // Ignored - populated by destination adapter from CCIP message
+            sender: address(0), // Sanitized by CCIPSender
+            destinationToken: destToken,
             amount: amount,
             receiver: destReceiver,
             kind: IExecutor.IntentKind.Payment,
