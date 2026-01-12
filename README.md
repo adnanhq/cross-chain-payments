@@ -1,6 +1,123 @@
-# Cross-Chain Payment PoC
+# Cross-Chain Payment Infrastructure
 
-A proof-of-concept for cross-chain payments using **Chainlink CCIP** and **LayerZero v2 + Stargate v2**.
+A cross-chain payment infrastructure built using **Chainlink CCIP** and **LayerZero v2 + Stargate v2**.
+
+# Overview 
+
+### Core architecture (shared across bridges)
+- **Source chain**: user (or agent) calls `IntentSender` to initiate a payment intent + bridge funds.
+- **Destination chain**: a **bridge-specific adapter** proves provenance + forwards funds to `Executor`.
+- **`Executor`**: enforces idempotency (`intentId`), deadline, chain support (by `sourceChainId`), adapter integrity (via `CrossChainRegistry`), then transfers to `SimpleFundReceiver` and calls `processPayment(...)`.
+- **Refunds**: `SimpleFundReceiver` requests a refund from `Executor`; `Executor.executeRefund(intentId, refundBridgeId)` sends funds back through whichever bridge you choose at refund time.
+
+---
+
+## Terminology (bridge-specific)
+### CCIP
+- **CCIP chain selector**: Chainlink’s identifier for a chain in CCIP (not EVM `chainId`).
+
+### LayerZero v2 / Stargate v2
+- **EID (endpoint ID)**: LayerZero’s chain identifier (not EVM `chainId`).
+- **Peer**: trusted **remote sender contract identity** for a given source EID. In this PoC, peer = the source-chain `IntentSender` (encoded to `bytes32`).
+- **Stargate**: token-bridging app on top of LayerZero v2; it implements the `IOFT` send/quote interface for a given bridged asset.
+
+---
+
+## Payment flow: Chainlink CCIP
+### Source chain
+1. **EOA/agent → `IntentSender.sendIntentCCIP(...)`**
+2. `IntentSender._sanitizeIntent(...)`:
+   - binds `intent.sender = msg.sender`
+   - sets `intent.sourceChainId = block.chainid`
+   - validates amount/receiver/deadline
+3. `IntentSender`:
+   - pulls `sourceToken` from user
+   - approves CCIP router
+   - calls **CCIP router** `ccipSend(...)` with:
+     - `data = abi.encode(intent)`
+     - tokenAmounts = the bridged token+amount
+
+### Destination chain
+4. **CCIP router → `ChainlinkCCIPAdapter._ccipReceive(...)`**
+5. `ChainlinkCCIPAdapter` verifies:
+   - `allowedSenders[message.sourceChainSelector][sourceSender] == true`
+   - token+amount in message matches `intent.destinationToken` + `intent.amount`
+   - `selectorByChainId[intent.sourceChainId] == message.sourceChainSelector` (ties payload chainId to CCIP provenance)
+6. Adapter transfers received token to **`Executor`** and calls:
+   - **`Executor.executeIntent(keccak256("CCIP"), intent)`**
+
+### Destination execution
+7. `Executor.executeIntent(...)` verifies:
+   - intent not processed, not expired
+   - chain supported in `CrossChainRegistry` by **`intent.sourceChainId`**
+   - adapter integrity via `registry.getBridgeAdapter(intent.sourceChainId, bridgeId) == msg.sender`
+8. `Executor` transfers tokens to `SimpleFundReceiver` and calls `processPayment(...)`.
+
+---
+
+## Payment flow: LayerZero v2 + Stargate v2 (with compose)
+### Source chain
+1. **EOA/agent → `IntentSender.sendIntentLayerZeroStargate(...)`**
+2. `IntentSender._sanitizeIntent(...)`:
+   - binds `intent.sender`
+   - sets `intent.sourceChainId = block.chainid`
+   - validates amount/receiver/deadline
+3. `IntentSender`:
+   - pulls tokens from user
+   - calls **Stargate v2** `send(...)` with a `SendParam` that includes:
+     - `dstEid` (LayerZero destination chain ID)
+     - `to = destination adapter address (bytes32)`
+     - `composeMsg = [composeFrom=this IntentSender][abi.encode(intent)]`
+     - `oftCmd=""` (taxi mode, needed for compose)
+   - pays `MessagingFee.nativeFee` (native gas token)
+
+### Destination chain
+4. Stargate delivers tokens to the destination adapter address and triggers a **compose**.
+5. **LayerZero EndpointV2 → `LayerZeroStargateAdapter.lzCompose(...)`**
+6. `LayerZeroStargateAdapter` verifies:
+   - caller is EndpointV2
+   - `composeFrom == peers[srcEid]` (peer check: only your source `IntentSender` is trusted for that EID)
+   - `dstEidByChainId[intent.sourceChainId] == srcEid` (ties payload chainId to LayerZero provenance EID)
+   - `_from` is the expected Stargate contract for `intent.destinationToken` (`setStargateForToken` config)
+   - delivered `amountLD` equals `intent.amount`
+7. Adapter transfers tokens to **`Executor`** and calls:
+   - **`Executor.executeIntent(keccak256("LAYERZERO"), intent)`**
+8. From here, destination execution is identical to CCIP (same `Executor` / `SimpleFundReceiver` path).
+
+---
+
+## Refund flow (shared app-level steps, bridge differs only at the final hop)
+### Destination chain (start)
+1. Someone enables refunds and calls **`SimpleFundReceiver.claimRefund(intentId)`**
+2. `SimpleFundReceiver`:
+   - transfers the destination token back to **`Executor`**
+   - calls **`Executor.requestRefund(intentId, token, amount, originalSender)`**
+3. `Executor.requestRefund` stores a `RefundRequest` including `sourceChainId`.
+
+### Destination chain (execute)
+4. Operator/agent calls **`Executor.executeRefund(intentId, refundBridgeId)`**
+   - `refundBridgeId` can be `keccak256("CCIP")` or `keccak256("LAYERZERO")` (and can differ from the inbound bridge)
+5. `Executor.executeRefund`:
+   - fetches adapter from registry using `(refundRequest.sourceChainId, refundBridgeId)`
+   - quotes fee via adapter `quoteRefundFee(sourceChainId, token, amount)`
+   - approves adapter and calls `adapter.sendRefund(sourceChainId, recipient, token, amount)`
+
+### Source chain (final hop depends on bridge)
+#### Refund via CCIP
+6. `ChainlinkCCIPAdapter.sendRefund(sourceChainId, ...)`:
+   - looks up `destinationChainSelector = selectorByChainId[sourceChainId]`
+   - calls CCIP router to bridge tokens to `recipient` on the source chain.
+
+#### Refund via LayerZero/Stargate
+6. `LayerZeroStargateAdapter.sendRefund(sourceChainId, ...)`:
+   - looks up `dstEid = dstEidByChainId[sourceChainId]`
+   - calls Stargate `send(...)` to bridge tokens back to `recipient` on the source chain.
+
+---
+
+
+# Usage
+
 
 ## Build
 
