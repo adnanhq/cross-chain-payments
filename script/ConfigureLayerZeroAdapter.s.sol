@@ -9,7 +9,7 @@ import {LayerZeroStargateAdapter} from "../src/bridges/LayerZeroStargateAdapter.
  *
  * Required env vars:
  * - ADAPTER: LayerZeroStargateAdapter address (destination chain)
- * - SOURCE_CHAIN_SELECTOR: your protocol source chain selector (uint64, used by Executor/Registry)
+ * - SOURCE_CHAIN_ID: your protocol source chainId (uint256, used by Executor/Registry)
  * - LZ_SOURCE_EID: LayerZero srcEid for the source chain (uint32)
  * - SOURCE_SENDER: source chain IntentSender address
  *
@@ -24,7 +24,7 @@ import {LayerZeroStargateAdapter} from "../src/bridges/LayerZeroStargateAdapter.
 contract ConfigureLayerZeroAdapter is Script {
     function run() external {
         address adapterAddress = vm.envAddress("ADAPTER");
-        uint64 sourceChainSelector = uint64(vm.envUint("SOURCE_CHAIN_SELECTOR"));
+        uint256 sourceChainId = vm.envUint("SOURCE_CHAIN_ID");
         uint32 srcEid = uint32(vm.envUint("LZ_SOURCE_EID"));
         address sourceSender = vm.envAddress("SOURCE_SENDER");
 
@@ -38,8 +38,7 @@ contract ConfigureLayerZeroAdapter is Script {
         LayerZeroStargateAdapter adapter = LayerZeroStargateAdapter(payable(adapterAddress));
 
         adapter.setPeer(srcEid, bytes32(uint256(uint160(sourceSender))));
-        adapter.setSrcEidMapping(srcEid, sourceChainSelector);
-        adapter.setChainSelectorMapping(sourceChainSelector, dstEid);
+        adapter.setChainIdMapping(sourceChainId, dstEid);
         adapter.setStargateForToken(destinationToken, destinationStargate);
 
         vm.stopBroadcast();
@@ -47,7 +46,7 @@ contract ConfigureLayerZeroAdapter is Script {
         console.log("Configured LayerZero adapter:", adapterAddress);
         console.log("srcEid:", srcEid);
         console.log("peer (source sender):", sourceSender);
-        console.log("sourceChainSelector:", sourceChainSelector);
+        console.log("sourceChainId:", sourceChainId);
         console.log("refund dstEid:", dstEid);
         console.log("destination token:", destinationToken);
         console.log("destination stargate:", destinationStargate);

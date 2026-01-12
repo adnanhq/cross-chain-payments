@@ -33,9 +33,12 @@ forge build
 
 ```bash
 export CCIP_ROUTER=<dest_chain_ccip_router>
-export SOURCE_CHAIN_SELECTOR=<source_chain_ccip_selector>
+export SOURCE_CHAIN_ID=<source_chain_evm_chain_id>
 # Optional: if you already know the source sender contract (IntentSender), you can set it during deployment:
 # export SOURCE_SENDER=<source_chain_intent_sender_address>
+
+# Optional (CCIP): CCIP source chain selector (required if you want to configure allowed sender + refunds during deploy)
+# export CCIP_SOURCE_CHAIN_SELECTOR=<source_chain_ccip_selector>
 
 # Optional (LayerZero/Stargate): deploy + partially configure the LayerZero adapter during destination deployment
 # export LZ_ENDPOINT_V2=<dest_chain_layerzero_endpoint_v2>
@@ -70,7 +73,8 @@ Allow the source chain sender (`IntentSender`) on the destination **CCIP** adapt
 
 ```bash
 export ADAPTER=<adapter_address_from_step_1>
-export SOURCE_CHAIN_SELECTOR=<source_chain_ccip_selector>
+export SOURCE_CHAIN_ID=<source_chain_evm_chain_id>
+export CCIP_SOURCE_CHAIN_SELECTOR=<source_chain_ccip_selector>
 export SOURCE_SENDER=<sender_address_from_step_2>
 
 forge script script/ConfigureAdapter.s.sol \
@@ -85,7 +89,7 @@ If you deployed the destination chain before knowing the source `IntentSender`, 
 
 ```bash
 export ADAPTER=<layerzero_adapter_address_from_step_1>
-export SOURCE_CHAIN_SELECTOR=<source_chain_selector_used_in_registry>
+export SOURCE_CHAIN_ID=<source_chain_evm_chain_id>
 export LZ_SOURCE_EID=<source_chain_layerzero_eid>
 export SOURCE_SENDER=<intent_sender_address_from_step_2>
 
@@ -104,7 +108,6 @@ forge script script/ConfigureLayerZeroAdapter.s.sol \
 ### Step 4: Send a Cross-Chain Payment (CCIP or LayerZero)
 
 ```bash
-export SOURCE_CHAIN_SELECTOR=<source_chain_ccip_selector>
 export SOURCE_TOKEN=<source_chain_token_address>
 export DEST_TOKEN=<dest_chain_token_address>      # may differ from SOURCE_TOKEN
 export SENDER=<intent_sender_contract_address>
@@ -135,7 +138,8 @@ forge script script/SendIntent.s.sol \
 
 ### Notes
 
-- `SOURCE_CHAIN_SELECTOR` / `DEST_CHAIN_SELECTOR` are **CCIP chain selectors**, not EVM `chainId`.
+- `SOURCE_CHAIN_ID` is the **EVM chainId** for the source chain (used by the protocol registry/executor).
+- `DEST_CHAIN_SELECTOR` is a **CCIP chain selector**, not EVM `chainId` (only used when BRIDGE=CCIP).
 - LayerZero uses **endpoint IDs** (EIDs): `LZ_SOURCE_EID` / `DST_EID`.
 - Destination-side intent semantics:
   - `intent.destinationToken` is the **destination-chain** ERC20 expected to be delivered

@@ -7,16 +7,18 @@ import {ChainlinkCCIPAdapter} from "../src/bridges/ChainlinkCCIPAdapter.sol";
 contract ConfigureAdapter is Script {
     function run() external {
         address adapterAddress = vm.envAddress("ADAPTER");
-        uint64 sourceChainSelector = uint64(vm.envUint("SOURCE_CHAIN_SELECTOR"));
+        uint256 sourceChainId = vm.envUint("SOURCE_CHAIN_ID");
+        uint64 ccipSourceChainSelector = uint64(vm.envUint("CCIP_SOURCE_CHAIN_SELECTOR"));
         address sourceSender = vm.envAddress("SOURCE_SENDER");
 
         vm.startBroadcast();
 
         ChainlinkCCIPAdapter adapter = ChainlinkCCIPAdapter(payable(adapterAddress));
-        adapter.setAllowedSender(sourceChainSelector, sourceSender, true);
+        adapter.setSelectorForChainId(sourceChainId, ccipSourceChainSelector);
+        adapter.setAllowedSender(ccipSourceChainSelector, sourceSender, true);
 
         vm.stopBroadcast();
 
-        console.log("Allowed sender", sourceSender, "from chain", sourceChainSelector);
+        console.log("Allowed sender", sourceSender, "from CCIP selector", ccipSourceChainSelector);
     }
 }

@@ -27,6 +27,9 @@ contract ChainlinkCCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
     /// @notice Allowed source chain senders: chainSelector => sender => allowed
     mapping(uint64 => mapping(address => bool)) public allowedSenders;
 
+    /// @notice EVM chainId -> CCIP chain selector (for refunds)
+    mapping(uint256 => uint64) public selectorByChainId;
+
     /*//////////////////////////////////////////////////////////////
                                   ERRORS
     //////////////////////////////////////////////////////////////*/
@@ -36,13 +39,15 @@ contract ChainlinkCCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
     error ChainlinkCCIPAdapter__UnexpectedTokenCount();
     error ChainlinkCCIPAdapter__TokenMismatch();
     error ChainlinkCCIPAdapter__AmountMismatch();
+    error ChainlinkCCIPAdapter__UnknownDestinationChainId();
+    error ChainlinkCCIPAdapter__SourceChainIdMismatch(uint256 payloadChainId, uint64 provenanceSelector, uint64 expectedSelector);
 
     /*//////////////////////////////////////////////////////////////
                                   EVENTS
     //////////////////////////////////////////////////////////////*/
 
     event SenderAllowed(uint64 indexed chainSelector, address indexed sender, bool allowed);
-    event RefundSent(bytes32 indexed messageId, uint64 destinationChainSelector, address recipient, uint256 amount);
+    event RefundSent(bytes32 indexed messageId, uint256 destinationChainId, address recipient, uint256 amount);
 
     constructor(address _router, address _executor) CCIPReceiver(_router) Ownable(msg.sender) {
         executor = IExecutor(_executor);
@@ -73,8 +78,12 @@ contract ChainlinkCCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         // Decode the intent from message data
         IExecutor.CrossChainIntent memory intent = abi.decode(message.data, (IExecutor.CrossChainIntent));
 
-        // Bind sourceChainSelector from CCIP message provenance (similar to sender sanitization)
-        intent.sourceChainSelector = message.sourceChainSelector;
+        // Validate the claimed sourceChainId against CCIP provenance selector using the chainId->selector mapping.
+        // This avoids maintaining a separate selector->chainId mapping and ensures refunds will route correctly.
+        uint64 expectedSelector = selectorByChainId[intent.sourceChainId];
+        if (expectedSelector != message.sourceChainSelector) {
+            revert ChainlinkCCIPAdapter__SourceChainIdMismatch(intent.sourceChainId, message.sourceChainSelector, expectedSelector);
+        }
 
         // Verify token matches
         if (intent.destinationToken != receivedToken) revert ChainlinkCCIPAdapter__TokenMismatch();
@@ -97,7 +106,7 @@ contract ChainlinkCCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
      * @inheritdoc IBridgeAdapter
      * @notice Send tokens back to source chain as a refund
      */
-    function sendRefund(uint64 destinationChainSelector, address recipient, address token, uint256 amount)
+    function sendRefund(uint256 destinationChainId, address recipient, address token, uint256 amount)
         external
         payable
         returns (bytes32 messageId)
@@ -105,12 +114,14 @@ contract ChainlinkCCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         // Only executor can send refunds
         if (msg.sender != address(executor)) revert ChainlinkCCIPAdapter__Unauthorized();
 
+        uint64 destinationChainSelector = selectorByChainId[destinationChainId];
+        if (destinationChainSelector == 0) revert ChainlinkCCIPAdapter__UnknownDestinationChainId();
+
         // Transfer tokens from executor to this contract
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         // Build the CCIP message
-        Client.EVM2AnyMessage memory ccipMessage =
-            _buildRefundMessage(destinationChainSelector, recipient, token, amount);
+        Client.EVM2AnyMessage memory ccipMessage = _buildRefundMessage(destinationChainSelector, recipient, token, amount);
 
         // Get the router
         IRouterClient router = IRouterClient(getRouter());
@@ -121,18 +132,21 @@ contract ChainlinkCCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
         // Send the message
         messageId = router.ccipSend{value: msg.value}(destinationChainSelector, ccipMessage);
 
-        emit RefundSent(messageId, destinationChainSelector, recipient, amount);
+        emit RefundSent(messageId, destinationChainId, recipient, amount);
     }
 
     /**
      * @inheritdoc IBridgeAdapter
      * @notice Get the fee for sending a refund
      */
-    function quoteRefundFee(uint64 destinationChainSelector, address token, uint256 amount)
+    function quoteRefundFee(uint256 destinationChainId, address token, uint256 amount)
         external
         view
         returns (uint256 fee)
     {
+        uint64 destinationChainSelector = selectorByChainId[destinationChainId];
+        if (destinationChainSelector == 0) revert ChainlinkCCIPAdapter__UnknownDestinationChainId();
+
         Client.EVM2AnyMessage memory ccipMessage =
             _buildRefundMessage(destinationChainSelector, address(0), token, amount);
         return IRouterClient(getRouter()).getFee(destinationChainSelector, ccipMessage);
@@ -170,6 +184,14 @@ contract ChainlinkCCIPAdapter is CCIPReceiver, IBridgeAdapter, Ownable {
     function setAllowedSender(uint64 chainSelector, address sender, bool allowed) external onlyOwner {
         allowedSenders[chainSelector][sender] = allowed;
         emit SenderAllowed(chainSelector, sender, allowed);
+    }
+
+    /**
+     * @notice Map an EVM chainId to a CCIP chain selector (used for refunds).
+     */
+    function setSelectorForChainId(uint256 chainId, uint64 ccipChainSelector) external onlyOwner {
+        if (ccipChainSelector == 0) revert ChainlinkCCIPAdapter__UnknownDestinationChainId();
+        selectorByChainId[chainId] = ccipChainSelector;
     }
 
     /**

@@ -10,10 +10,10 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
  */
 contract CrossChainRegistry is ICrossChainRegistry, Ownable(msg.sender) {
     /// @notice Chain configurations
-    mapping(uint64 => ChainConfig) private _chainConfigs;
+    mapping(uint256 => ChainConfig) private _chainConfigs;
 
-    /// @notice Bridge adapter registry: chainSelector => bridgeId => (adapter, enabled)
-    mapping(uint64 => mapping(bytes32 => AdapterInfo)) private _bridgeAdapters;
+    /// @notice Bridge adapter registry: chainId => bridgeId => (adapter, enabled)
+    mapping(uint256 => mapping(bytes32 => AdapterInfo)) private _bridgeAdapters;
 
     struct AdapterInfo {
         address adapter;
@@ -21,50 +21,50 @@ contract CrossChainRegistry is ICrossChainRegistry, Ownable(msg.sender) {
     }
 
     /// @inheritdoc ICrossChainRegistry
-    function setChainConfig(uint64 chainSelector, ChainConfig calldata config) external onlyOwner {
-        _chainConfigs[chainSelector] = config;
-        emit ChainConfigSet(chainSelector, config.isSupported, config.isPaused);
+    function setChainConfig(uint256 chainId, ChainConfig calldata config) external onlyOwner {
+        _chainConfigs[chainId] = config;
+        emit ChainConfigSet(chainId, config.isSupported, config.isPaused);
     }
 
     /// @inheritdoc ICrossChainRegistry
-    function getChainConfig(uint64 chainSelector) external view returns (ChainConfig memory) {
-        return _chainConfigs[chainSelector];
+    function getChainConfig(uint256 chainId) external view returns (ChainConfig memory) {
+        return _chainConfigs[chainId];
     }
 
     /// @inheritdoc ICrossChainRegistry
-    function isChainSupported(uint64 chainSelector) external view returns (bool) {
-        ChainConfig memory config = _chainConfigs[chainSelector];
+    function isChainSupported(uint256 chainId) external view returns (bool) {
+        ChainConfig memory config = _chainConfigs[chainId];
         return config.isSupported && !config.isPaused;
     }
 
     /// @inheritdoc ICrossChainRegistry
-    function setBridgeAdapter(uint64 chainSelector, bytes32 bridgeId, address adapter, bool enabled)
+    function setBridgeAdapter(uint256 chainId, bytes32 bridgeId, address adapter, bool enabled)
         external
         onlyOwner
     {
-        _bridgeAdapters[chainSelector][bridgeId] = AdapterInfo({adapter: adapter, enabled: enabled});
-        emit BridgeAdapterSet(chainSelector, bridgeId, adapter, enabled);
+        _bridgeAdapters[chainId][bridgeId] = AdapterInfo({adapter: adapter, enabled: enabled});
+        emit BridgeAdapterSet(chainId, bridgeId, adapter, enabled);
     }
 
     /// @inheritdoc ICrossChainRegistry
-    function getBridgeAdapter(uint64 chainSelector, bytes32 bridgeId)
+    function getBridgeAdapter(uint256 chainId, bytes32 bridgeId)
         external
         view
         returns (address adapter, bool enabled)
     {
-        AdapterInfo memory info = _bridgeAdapters[chainSelector][bridgeId];
+        AdapterInfo memory info = _bridgeAdapters[chainId][bridgeId];
         return (info.adapter, info.enabled);
     }
 
     /// @inheritdoc ICrossChainRegistry
-    function pauseChain(uint64 chainSelector) external onlyOwner {
-        _chainConfigs[chainSelector].isPaused = true;
-        emit ChainPaused(chainSelector);
+    function pauseChain(uint256 chainId) external onlyOwner {
+        _chainConfigs[chainId].isPaused = true;
+        emit ChainPaused(chainId);
     }
 
     /// @inheritdoc ICrossChainRegistry
-    function unpauseChain(uint64 chainSelector) external onlyOwner {
-        _chainConfigs[chainSelector].isPaused = false;
-        emit ChainUnpaused(chainSelector);
+    function unpauseChain(uint256 chainId) external onlyOwner {
+        _chainConfigs[chainId].isPaused = false;
+        emit ChainUnpaused(chainId);
     }
 }

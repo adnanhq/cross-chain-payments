@@ -88,12 +88,13 @@ contract IntentSender {
                              SHARED VALIDATION
     //////////////////////////////////////////////////////////////*/
 
-    function _validateAndBindSender(IExecutor.CrossChainIntent memory intent) internal view {
+    function _sanitizeIntent(IExecutor.CrossChainIntent memory intent) internal view {
         if (intent.amount == 0) revert IntentSender__InvalidAmount();
         if (intent.receiver == address(0)) revert IntentSender__InvalidReceiver();
-        if (block.timestamp > intent.deadline) revert IntentSender__IntentExpired();
+        if (block.timestamp >= intent.deadline) revert IntentSender__IntentExpired();
         // Bind sender to caller
         intent.sender = msg.sender;
+        intent.sourceChainId = block.chainid;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -106,7 +107,7 @@ contract IntentSender {
         address sourceToken,
         IExecutor.CrossChainIntent memory intent
     ) external view returns (uint256 fee) {
-        _validateAndBindSender(intent);
+        _sanitizeIntent(intent);
         Client.EVM2AnyMessage memory ccipMessage = _buildCCIPIntentMessage(destinationAdapter, sourceToken, intent);
         fee = CCIP_ROUTER.getFee(destinationChainSelector, ccipMessage);
     }
@@ -117,7 +118,7 @@ contract IntentSender {
         address sourceToken,
         IExecutor.CrossChainIntent memory intent
     ) external payable returns (bytes32 messageId) {
-        _validateAndBindSender(intent);
+        _sanitizeIntent(intent);
 
         Client.EVM2AnyMessage memory ccipMessage = _buildCCIPIntentMessage(destinationAdapter, sourceToken, intent);
 
@@ -204,7 +205,7 @@ contract IntentSender {
         LzStargateSendParams calldata p,
         IExecutor.CrossChainIntent memory intent
     ) external payable returns (bytes32 guid) {
-        _validateAndBindSender(intent);
+        _sanitizeIntent(intent);
 
         // Validate Stargate token matches provided sourceToken to avoid approving/bridging wrong assets.
         if (IStargate(p.stargate).token() != p.sourceToken) revert IntentSender__InvalidStargate();

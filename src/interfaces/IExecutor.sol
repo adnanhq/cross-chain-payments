@@ -22,7 +22,7 @@ interface IExecutor {
 
     /// @notice Cross-chain payment intent structure
     /// @param intentId Unique identifier (also used as paymentId/pledgeId on destination)
-    /// @param sourceChainSelector Origin chain selector (set by bridge adapter from message provenance)
+    /// @param sourceChainId Origin EVM chainId (set by bridge adapter from message provenance)
     /// @param sender Original sender on source chain
     /// @param destinationToken ERC20 token on destination chain delivered by the bridge
     /// @param amount Amount delivered (in token decimals)
@@ -32,7 +32,7 @@ interface IExecutor {
     /// @param deadline Intent expiration timestamp
     struct CrossChainIntent {
         bytes32 intentId;
-        uint64 sourceChainSelector;
+        uint256 sourceChainId;
         address sender;
         address destinationToken;
         uint256 amount;
@@ -46,17 +46,17 @@ interface IExecutor {
     /// @param destinationToken Token to refund (destination chain token)
     /// @param amount Amount to refund
     /// @param recipient Recipient on source chain
-    /// @param sourceChainSelector Source chain selector for routing
+    /// @param sourceChainId Source chainId for routing
     struct RefundRequest {
         address destinationToken;
         uint256 amount;
         address recipient;
-        uint64 sourceChainSelector;
+        uint256 sourceChainId;
     }
 
     /// @notice Called by bridge adapters after assets are delivered to Executor
-    /// @param bridgeId Identifier like keccak256("CCIP") used for refund routing
-    /// @param intent The cross-chain intent to execute (sourceChainSelector populated by adapter)
+    /// @param bridgeId Identifier like keccak256("CCIP")
+    /// @param intent The cross-chain intent to execute (sourceChainId populated by adapter)
     function executeIntent(bytes32 bridgeId, CrossChainIntent calldata intent) external;
 
     /// @notice Called by the fund receiver to request a refund back to source chain
@@ -66,10 +66,11 @@ interface IExecutor {
     /// @param recipient Recipient on source chain
     function requestRefund(bytes32 intentId, address destinationToken, uint256 amount, address recipient) external;
 
-    /// @notice Execute a pending refund by bridging tokens back to source chain
+    /// @notice Execute a pending refund by bridging tokens back to source chain.
     /// @param intentId The intent ID to refund
+    /// @param refundBridgeId Bridge to use for the refund (can differ from inbound bridge)
     /// @return refundId The bridge message ID for tracking
-    function executeRefund(bytes32 intentId) external payable returns (bytes32 refundId);
+    function executeRefund(bytes32 intentId, bytes32 refundBridgeId) external payable returns (bytes32 refundId);
 
     /// @notice Get the status of an intent
     /// @param intentId The intent ID to query

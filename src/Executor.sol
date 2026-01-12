@@ -27,8 +27,8 @@ contract Executor is IExecutor, Ownable, Pausable {
     /// @notice Intent record storing execution details
     struct IntentRecord {
         IntentStatus status;
-        uint64 sourceChainSelector;
-        bytes32 bridgeId;
+        uint256 sourceChainId;
+        bytes32 inboundBridgeId;
         address destinationToken;
         uint256 escrowedAmount;
         address sender;
@@ -85,14 +85,14 @@ contract Executor is IExecutor, Ownable, Pausable {
             revert Executor__IntentExpired();
         }
 
-        // Check chain is supported (sourceChainSelector set by adapter from bridge provenance)
-        ICrossChainRegistry.ChainConfig memory config = registry.getChainConfig(intent.sourceChainSelector);
+        // Check chain is supported (sourceChainId set by adapter from bridge provenance)
+        ICrossChainRegistry.ChainConfig memory config = registry.getChainConfig(intent.sourceChainId);
         if (!config.isSupported || config.isPaused) {
             revert Executor__ChainNotSupported();
         }
 
         // Verify adapter integrity
-        (address expectedAdapter, bool enabled) = registry.getBridgeAdapter(intent.sourceChainSelector, bridgeId);
+        (address expectedAdapter, bool enabled) = registry.getBridgeAdapter(intent.sourceChainId, bridgeId);
         if (!enabled || expectedAdapter != msg.sender) {
             revert Executor__AdapterMismatch();
         }
@@ -110,8 +110,8 @@ contract Executor is IExecutor, Ownable, Pausable {
         // Record the intent (acts as reentrancy guard for this intentId)
         intents[intent.intentId] = IntentRecord({
             status: IntentStatus.Executed,
-            sourceChainSelector: intent.sourceChainSelector,
-            bridgeId: bridgeId,
+            sourceChainId: intent.sourceChainId,
+            inboundBridgeId: bridgeId,
             destinationToken: intent.destinationToken,
             escrowedAmount: intent.amount,
             sender: intent.sender,
@@ -151,14 +151,19 @@ contract Executor is IExecutor, Ownable, Pausable {
             destinationToken: destinationToken,
             amount: amount,
             recipient: recipient,
-            sourceChainSelector: record.sourceChainSelector
+            sourceChainId: record.sourceChainId
         });
 
         emit RefundRequested(intentId, destinationToken, amount, recipient);
     }
 
     /// @inheritdoc IExecutor
-    function executeRefund(bytes32 intentId) external payable whenNotPaused returns (bytes32 refundId) {
+    function executeRefund(bytes32 intentId, bytes32 refundBridgeId)
+        external
+        payable
+        whenNotPaused
+        returns (bytes32 refundId)
+    {
         IntentRecord memory record = intents[intentId];
         RefundRequest memory request = refundRequests[intentId];
 
@@ -167,15 +172,15 @@ contract Executor is IExecutor, Ownable, Pausable {
             revert Executor__RefundNotRequested();
         }
 
-        // Get the adapter for this bridge
-        (address adapter, bool enabled) = registry.getBridgeAdapter(record.sourceChainSelector, record.bridgeId);
+        // Get the adapter for the requested refund bridge (can differ from inbound bridge).
+        (address adapter, bool enabled) = registry.getBridgeAdapter(request.sourceChainId, refundBridgeId);
         if (!enabled) {
             revert Executor__AdapterMismatch();
         }
 
         // Check fee
         uint256 requiredFee = IBridgeAdapter(adapter)
-            .quoteRefundFee(request.sourceChainSelector, request.destinationToken, request.amount);
+            .quoteRefundFee(request.sourceChainId, request.destinationToken, request.amount);
         if (msg.value < requiredFee) {
             revert Executor__InsufficientFee();
         }
@@ -188,7 +193,7 @@ contract Executor is IExecutor, Ownable, Pausable {
 
         // Send refund via bridge
         refundId = IBridgeAdapter(adapter).sendRefund{value: msg.value}(
-            request.sourceChainSelector, request.recipient, request.destinationToken, request.amount
+            request.sourceChainId, request.recipient, request.destinationToken, request.amount
         );
 
         // Reset approval

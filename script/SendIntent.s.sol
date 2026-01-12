@@ -39,7 +39,7 @@ contract SendIntent is Script {
 
         IExecutor.CrossChainIntent memory intent = IExecutor.CrossChainIntent({
             intentId: intentId,
-            sourceChainSelector: 0,
+            sourceChainId: 0, // ignored; populated by destination adapter from bridge provenance
             sender: address(0),
             destinationToken: destToken,
             amount: amount,
@@ -89,7 +89,7 @@ contract SendIntent is Script {
         // Intent amount must match the expected delivered amount (after Stargate fee/reward).
         IExecutor.CrossChainIntent memory intent = IExecutor.CrossChainIntent({
             intentId: intentId,
-            sourceChainSelector: 0,
+            sourceChainId: 0, // ignored; populated by destination adapter from bridge provenance
             sender: address(0),
             destinationToken: destToken,
             amount: 0, // set below from quoteOFT

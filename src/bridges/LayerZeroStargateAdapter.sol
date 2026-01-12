@@ -35,12 +35,8 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
     /// @notice srcEid => trusted composeFrom (bytes32-encoded source sender contract)
     mapping(uint32 => bytes32) public peers;
 
-    /// @notice srcEid => protocol sourceChainSelector (your protocol's chain identifier)
-    mapping(uint32 => uint64) public sourceChainSelectorBySrcEid;
-    mapping(uint32 => bool) public srcEidConfigured;
-
-    /// @notice chainSelector => dstEid (used for refunds back to the source chain)
-    mapping(uint64 => uint32) public dstEidByChainSelector;
+    /// @notice destination chainId => dstEid (used for refunds back to the source chain)
+    mapping(uint256 => uint32) public dstEidByChainId;
 
     /// @notice Destination token => Stargate v2 contract address on this chain for that token
     mapping(address => address) public stargateByDestinationToken;
@@ -51,22 +47,22 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
 
     error LayerZeroStargateAdapter__Unauthorized();
     error LayerZeroStargateAdapter__InvalidPeer();
-    error LayerZeroStargateAdapter__UnknownSourceEid();
     error LayerZeroStargateAdapter__InvalidStargateComposer();
     error LayerZeroStargateAdapter__TokenNotConfigured();
     error LayerZeroStargateAdapter__AmountMismatch();
+    error LayerZeroStargateAdapter__UnknownDestinationChainId();
+    error LayerZeroStargateAdapter__SourceChainIdMismatch(uint256 payloadChainId, uint32 provenanceSrcEid, uint32 expectedEid);
 
     /*//////////////////////////////////////////////////////////////
                                   EVENTS
     //////////////////////////////////////////////////////////////*/
 
     event PeerSet(uint32 indexed srcEid, bytes32 indexed peer);
-    event SrcEidMapped(uint32 indexed srcEid, uint64 indexed sourceChainSelector);
-    event ChainSelectorMapped(uint64 indexed chainSelector, uint32 indexed dstEid);
+    event ChainIdMapped(uint256 indexed chainId, uint32 indexed dstEid);
     event StargateForTokenSet(address indexed token, address indexed stargate);
     event ExecutorSet(address indexed executor);
     event IntentComposed(bytes32 indexed guid, uint32 indexed srcEid, bytes32 indexed intentId, uint256 amountLD);
-    event RefundSent(bytes32 indexed guid, uint64 destinationChainSelector, address recipient, address token, uint256 amount);
+    event RefundSent(bytes32 indexed guid, uint256 destinationChainId, address recipient, address token, uint256 amount);
 
     constructor(address endpoint, address _executor) Ownable(msg.sender) {
         ENDPOINT = ILayerZeroEndpointV2(endpoint);
@@ -95,7 +91,6 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
         if (msg.sender != address(ENDPOINT)) revert LayerZeroStargateAdapter__Unauthorized();
 
         uint32 srcEid = OFTComposeMsgCodec.srcEid(_message);
-        if (!srcEidConfigured[srcEid]) revert LayerZeroStargateAdapter__UnknownSourceEid();
 
         bytes32 composeFrom = OFTComposeMsgCodec.composeFrom(_message);
         if (composeFrom != peers[srcEid]) revert LayerZeroStargateAdapter__InvalidPeer();
@@ -105,8 +100,11 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
         bytes memory inner = OFTComposeMsgCodec.composeMsg(_message);
         IExecutor.CrossChainIntent memory intent = abi.decode(inner, (IExecutor.CrossChainIntent));
 
-        // Bind sourceChainSelector from provenance (must be configured)
-        intent.sourceChainSelector = sourceChainSelectorBySrcEid[srcEid];
+        // Validate the claimed sourceChainId against LayerZero provenance srcEid using the chainId->eid mapping.
+        uint32 expectedEid = dstEidByChainId[intent.sourceChainId];
+        if (expectedEid != srcEid) {
+            revert LayerZeroStargateAdapter__SourceChainIdMismatch(intent.sourceChainId, srcEid, expectedEid);
+        }
 
         // Ensure the compose was initiated by the correct Stargate contract for this token.
         address expectedStargate = stargateByDestinationToken[intent.destinationToken];
@@ -127,7 +125,7 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
                         REFUNDS (IBridgeAdapter)
     //////////////////////////////////////////////////////////////*/
 
-    function quoteRefundFee(uint64 destinationChainSelector, address token, uint256 amount)
+    function quoteRefundFee(uint256 destinationChainId, address token, uint256 amount)
         external
         view
         override
@@ -135,7 +133,8 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
     {
         address stargate = stargateByDestinationToken[token];
         if (stargate == address(0)) revert LayerZeroStargateAdapter__TokenNotConfigured();
-        uint32 dstEid = dstEidByChainSelector[destinationChainSelector];
+        uint32 dstEid = dstEidByChainId[destinationChainId];
+        if (dstEid == 0) revert LayerZeroStargateAdapter__UnknownDestinationChainId();
 
         SendParam memory sendParam = SendParam({
             dstEid: dstEid,
@@ -151,7 +150,7 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
         return mfee.nativeFee;
     }
 
-    function sendRefund(uint64 destinationChainSelector, address recipient, address token, uint256 amount)
+    function sendRefund(uint256 destinationChainId, address recipient, address token, uint256 amount)
         external
         payable
         override
@@ -161,7 +160,8 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
 
         address stargate = stargateByDestinationToken[token];
         if (stargate == address(0)) revert LayerZeroStargateAdapter__TokenNotConfigured();
-        uint32 dstEid = dstEidByChainSelector[destinationChainSelector];
+        uint32 dstEid = dstEidByChainId[destinationChainId];
+        if (dstEid == 0) revert LayerZeroStargateAdapter__UnknownDestinationChainId();
 
         // Pull tokens from Executor.
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
@@ -188,7 +188,7 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
         IERC20(token).forceApprove(stargate, 0);
 
         refundId = msgReceipt.guid;
-        emit RefundSent(refundId, destinationChainSelector, recipient, token, amount);
+        emit RefundSent(refundId, destinationChainId, recipient, token, amount);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -200,15 +200,10 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
         emit PeerSet(srcEid, peer);
     }
 
-    function setSrcEidMapping(uint32 srcEid, uint64 sourceChainSelector) external onlyOwner {
-        sourceChainSelectorBySrcEid[srcEid] = sourceChainSelector;
-        srcEidConfigured[srcEid] = true;
-        emit SrcEidMapped(srcEid, sourceChainSelector);
-    }
-
-    function setChainSelectorMapping(uint64 chainSelector, uint32 dstEid) external onlyOwner {
-        dstEidByChainSelector[chainSelector] = dstEid;
-        emit ChainSelectorMapped(chainSelector, dstEid);
+    function setChainIdMapping(uint256 chainId, uint32 dstEid) external onlyOwner {
+        if (dstEid == 0) revert LayerZeroStargateAdapter__UnknownDestinationChainId();
+        dstEidByChainId[chainId] = dstEid;
+        emit ChainIdMapped(chainId, dstEid);
     }
 
     function setStargateForToken(address token, address stargate) external onlyOwner {
