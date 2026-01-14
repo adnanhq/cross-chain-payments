@@ -133,7 +133,10 @@ contract IntentSender {
         // reset approval (defensive; also prevents lingering allowance on router)
         IERC20(sourceToken).forceApprove(address(CCIP_ROUTER), 0);
 
-        _refundExcessFee(fee);
+        if (msg.value > fee) {
+            (bool success,) = msg.sender.call{value: msg.value - fee}("");
+            if (!success) revert IntentSender__FeeRefundFailed();
+        }
 
         emit IntentSentCCIP(
             messageId,
@@ -242,16 +245,17 @@ contract IntentSender {
         IERC20(p.sourceToken).safeTransferFrom(msg.sender, address(this), p.amountLD);
         IERC20(p.sourceToken).forceApprove(p.stargate, p.amountLD);
 
-        (MessagingReceipt memory msgReceipt,) = IStargate(p.stargate).send{value: nativeFee}(
+        // Stargate requires `msg.value == fee.nativeFee` (see StargateBase._assertMessagingFee), so if a caller
+        // provides a buffer above the quote we pass the full msg.value as `nativeFee`. LayerZero EndpointV2 will
+        // refund any excess above the required fee to `refundAddress`.
+        (MessagingReceipt memory msgReceipt,) = IStargate(p.stargate).send{value: msg.value}(
             sendParam,
-            MessagingFee({nativeFee: nativeFee, lzTokenFee: 0}),
-            payable(msg.sender) // allow Stargate/LZ to refund excess to the user directly
+            MessagingFee({nativeFee: msg.value, lzTokenFee: 0}),
+            payable(msg.sender) // receive LayerZero/Stargate fee refunds directly
         );
 
         // reset approval
         IERC20(p.sourceToken).forceApprove(p.stargate, 0);
-
-        _refundExcessFee(nativeFee);
 
         guid = msgReceipt.guid;
 
@@ -265,13 +269,6 @@ contract IntentSender {
             intent.destinationToken,
             amountReceivedLD
         );
-    }
-
-    function _refundExcessFee(uint256 usedFee) internal {
-        if (msg.value > usedFee) {
-            (bool success,) = msg.sender.call{value: msg.value - usedFee}("");
-            if (!success) revert IntentSender__FeeRefundFailed();
-        }
     }
 
     receive() external payable {}

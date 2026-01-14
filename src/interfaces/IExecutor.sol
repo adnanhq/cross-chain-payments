@@ -6,12 +6,6 @@ pragma solidity ^0.8.22;
  * @notice Interface for the Executor contract that handles cross-chain payment intents
  */
 interface IExecutor {
-    /// @notice The type of intent being executed
-    enum IntentKind {
-        Payment,
-        Pledge
-    }
-
     /// @notice The lifecycle status of an intent
     enum IntentStatus {
         Unseen,
@@ -21,14 +15,13 @@ interface IExecutor {
     }
 
     /// @notice Cross-chain payment intent structure
-    /// @param intentId Unique identifier (also used as paymentId/pledgeId on destination)
+    /// @param intentId Unique identifier (also used as paymentId on destination)
     /// @param sourceChainId Origin EVM chainId (set by bridge adapter from message provenance)
     /// @param sender Original sender on source chain
     /// @param destinationToken ERC20 token on destination chain delivered by the bridge
     /// @param amount Amount delivered (in token decimals)
     /// @param receiver The fund receiver contract on destination
-    /// @param kind Payment or Pledge
-    /// @param data ABI-encoded kind-specific params
+    /// @param data ABI-encoded payment-specific params (optional / app-defined)
     /// @param deadline Intent expiration timestamp
     struct CrossChainIntent {
         bytes32 intentId;
@@ -37,9 +30,8 @@ interface IExecutor {
         address destinationToken;
         uint256 amount;
         address receiver;
-        IntentKind kind;
-        bytes data;
         uint256 deadline;
+        bytes data;
     }
 
     /// @notice Refund request created by the treasury at refund time

@@ -44,7 +44,6 @@ contract SendIntent is Script {
             destinationToken: destToken,
             amount: amount,
             receiver: destReceiver,
-            kind: IExecutor.IntentKind.Payment,
             data: "",
             deadline: block.timestamp + 1 hours
         });
@@ -94,7 +93,6 @@ contract SendIntent is Script {
             destinationToken: destToken,
             amount: 0, // set below from quoteOFT
             receiver: destReceiver,
-            kind: IExecutor.IntentKind.Payment,
             data: "",
             deadline: block.timestamp + 1 hours
         });
