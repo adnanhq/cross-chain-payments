@@ -1,6 +1,6 @@
 # Cross-Chain Payment Infrastructure
 
-A cross-chain payment infrastructure built using **Chainlink CCIP** and **LayerZero v2 + Stargate v2**.
+A cross-chain payment infrastructure PoC using **Chainlink CCIP** and **LayerZero v2 + Stargate v2**.
 
 # Overview 
 
