@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity 0.8.24;
 
-import {IExecutor} from "./interfaces/IExecutor.sol";
+import {ICrossChainExecutor} from "./interfaces/ICrossChainExecutor.sol";
 import {ISimpleFundReceiver} from "./interfaces/ISimpleFundReceiver.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -9,6 +9,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 /**
  * @title SimpleFundReceiver
+ * @author 0x4dnanH (https://github.com/adnanhq)
  * @notice Minimal treasury-like contract that receives cross-chain payments
  * @dev Simplified PoC - just tracks payments and supports refunds
  */
@@ -59,6 +60,9 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
     function processPayment(bytes32 intentId, address sender, address token, uint256 amount, bytes calldata) external {
         if (msg.sender != executor) revert SimpleFundReceiver__Unauthorized();
 
+        // Pull the settled funds from the executor using the allowance granted for this payment.
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+
         // Record the payment
         payments[intentId] = Payment({
             intentId: intentId, 
@@ -101,7 +105,7 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
         IERC20(payment.token).safeTransfer(executor, payment.amount);
 
         // Request refund via executor - refund goes to original sender
-        IExecutor(executor).requestRefund(intentId, payment.token, payment.amount, payment.sender);
+        ICrossChainExecutor(executor).requestRefund(intentId, payment.amount, payment.sender);
 
         emit RefundInitiated(intentId, payment.token, payment.amount, payment.sender);
     }

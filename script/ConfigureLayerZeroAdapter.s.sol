@@ -1,56 +1,30 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity 0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
 import {LayerZeroStargateAdapter} from "../src/bridges/LayerZeroStargateAdapter.sol";
 
 /**
- * Configure the destination-chain LayerZero adapter after deployments.
+ * Configure trusted Stargate senders for the LayerZero adapter.
  *
- * Required env vars:
- * - ADAPTER: LayerZeroStargateAdapter address (destination chain)
- * - SOURCE_CHAIN_ID: your protocol source chainId (uint256, used by Executor/Registry)
- * - LZ_SOURCE_EID: LayerZero srcEid for the source chain (uint32)
- * - SOURCE_SENDER: source chain IntentSender address
- *
- * Token routing (required for compose verification + refunds):
- * - LZ_DESTINATION_TOKEN: destination-chain token address delivered to Executor
- * - LZ_DESTINATION_STARGATE: destination-chain Stargate v2 address for that token
- *
- * Optional (for refunds back to source):
- * - LZ_DST_EID: LayerZero dstEid to use when bridging refunds back to the source chain (uint32)
- *   If not set, defaults to LZ_SOURCE_EID.
+ * Required env:
+ * - ADAPTER: LayerZeroStargateAdapter address
+ * - LZ_DESTINATION_TOKEN: Destination token delivered by Stargate
+ * - LZ_DESTINATION_STARGATE: Trusted Stargate contract for that token
  */
 contract ConfigureLayerZeroAdapter is Script {
     function run() external {
         address adapterAddress = vm.envAddress("ADAPTER");
-        uint256 sourceChainId = vm.envUint("SOURCE_CHAIN_ID");
-        uint32 srcEid = uint32(vm.envUint("LZ_SOURCE_EID"));
-        address sourceSender = vm.envAddress("SOURCE_SENDER");
-
-        address destinationToken = vm.envAddress("LZ_DESTINATION_TOKEN");
-        address destinationStargate = vm.envAddress("LZ_DESTINATION_STARGATE");
-
-        uint32 dstEid = uint32(vm.envOr("LZ_DST_EID", uint256(srcEid)));
+        address token = vm.envAddress("LZ_DESTINATION_TOKEN");
+        address stargate = vm.envAddress("LZ_DESTINATION_STARGATE");
 
         vm.startBroadcast();
 
-        LayerZeroStargateAdapter adapter = LayerZeroStargateAdapter(payable(adapterAddress));
-
-        adapter.setPeer(srcEid, bytes32(uint256(uint160(sourceSender))));
-        adapter.setChainIdMapping(sourceChainId, dstEid);
-        adapter.setStargateForToken(destinationToken, destinationStargate);
+        LayerZeroStargateAdapter(adapterAddress).setStargateForToken(token, stargate);
+        console.log("LayerZeroStargateAdapter configured");
+        console.log("Token:", token);
+        console.log("Stargate:", stargate);
 
         vm.stopBroadcast();
-
-        console.log("Configured LayerZero adapter:", adapterAddress);
-        console.log("srcEid:", srcEid);
-        console.log("peer (source sender):", sourceSender);
-        console.log("sourceChainId:", sourceChainId);
-        console.log("refund dstEid:", dstEid);
-        console.log("destination token:", destinationToken);
-        console.log("destination stargate:", destinationStargate);
     }
 }
-
-

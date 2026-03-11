@@ -1,146 +1,176 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity 0.8.24;
 
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
-import {IBridgeAdapter} from "../interfaces/IBridgeAdapter.sol";
-import {IExecutor} from "../interfaces/IExecutor.sol";
 
 import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
 import {ILayerZeroEndpointV2} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
-
 import {OFTComposeMsgCodec} from "@layerzerolabs/lz-evm-oapp-v2/contracts/oft/libs/OFTComposeMsgCodec.sol";
 import {IStargate} from "@stargate-v2/interfaces/IStargate.sol";
-import {SendParam, MessagingFee, MessagingReceipt} from "@layerzerolabs/lz-evm-oapp-v2/contracts/oft/interfaces/IOFT.sol";
+import {
+    SendParam,
+    MessagingFee,
+    MessagingReceipt
+} from "@layerzerolabs/lz-evm-oapp-v2/contracts/oft/interfaces/IOFT.sol";
+
+import {ICrossChainExecutor} from "../interfaces/ICrossChainExecutor.sol";
+import {ILayerZeroStargateAdapter} from "../interfaces/ILayerZeroStargateAdapter.sol";
 
 /**
  * @title LayerZeroStargateAdapter
- * @notice Destination-chain adapter for LayerZero v2 + Stargate v2 token delivery + compose execution.
- * @dev Receives compose calls from the local LayerZero Endpoint, verifies provenance, forwards funds to Executor,
- *      and triggers intent execution. Implements `IBridgeAdapter` for refund bridging via Stargate v2.
+ * @author 0x4dnanH (https://github.com/adnanhq)
+ * @notice Destination-chain adapter for receiving cross-chain intents via LayerZero Stargate.
+ * @dev This adapter implements ILayerZeroComposer to receive OFT transfers with compose messages
+ *      from Stargate v2. It handles:
+ *      - Receiving and validating incoming compose messages containing payment intents
+ *      - Forwarding validated intents to the CrossChainExecutor
+ *      - Sending refunds back to source chains via Stargate
+ *
+ *      The adapter implements soft-failure validation: invalid intents are marked as Failed
+ *      rather than reverting, allowing funds to be held for refund processing.
+ *
+ *      PoC simplification: Stores executor address directly (no GlobalParams).
+ *      rescueTokens uses onlyOwner instead of protocol admin.
  */
-contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable {
+contract LayerZeroStargateAdapter is ILayerZeroComposer, ILayerZeroStargateAdapter, Ownable {
     using SafeERC20 for IERC20;
 
-    bytes32 public constant BRIDGE_ID = keccak256("LAYERZERO");
+    /// @notice Bridge identifier: keccak256("LAYERZERO")
+    bytes32 public constant BRIDGE_ID = 0xe34d309d2a3947d08baad60196a07f69352ed61cce4b781f48c19141173b2894;
 
-    /// @notice Local LayerZero EndpointV2 (calls lzCompose)
+    /// @notice LayerZero endpoint contract on this chain.
     ILayerZeroEndpointV2 public immutable ENDPOINT;
 
-    /// @notice Destination-chain Executor (receives funds + executes intent)
-    IExecutor public executor;
+    /// @notice Cross-chain executor contract address.
+    address public executor;
 
-    /// @notice srcEid => trusted composeFrom (bytes32-encoded source sender contract)
-    mapping(uint32 => bytes32) public peers;
+    /// @notice Trusted Stargate sender for each supported destination token.
+    mapping(address token => address stargate) public stargateByToken;
 
-    /// @notice destination chainId => dstEid (used for refunds back to the source chain)
-    mapping(uint256 => uint32) public dstEidByChainId;
+    /// @dev Destination token configured for each trusted Stargate sender.
+    mapping(address stargate => address token) private _tokenByStargate;
 
-    /// @notice Destination token => Stargate v2 contract address on this chain for that token
-    mapping(address => address) public stargateByDestinationToken;
-
-    /*//////////////////////////////////////////////////////////////
-                                  ERRORS
-    //////////////////////////////////////////////////////////////*/
-
-    error LayerZeroStargateAdapter__Unauthorized();
-    error LayerZeroStargateAdapter__InvalidPeer();
-    error LayerZeroStargateAdapter__InvalidStargateComposer();
-    error LayerZeroStargateAdapter__TokenNotConfigured();
-    error LayerZeroStargateAdapter__AmountMismatch();
-    error LayerZeroStargateAdapter__UnknownDestinationChainId();
-    error LayerZeroStargateAdapter__SourceChainIdMismatch(uint256 payloadChainId, uint32 provenanceSrcEid, uint32 expectedEid);
-
-    /*//////////////////////////////////////////////////////////////
-                                  EVENTS
-    //////////////////////////////////////////////////////////////*/
-
-    event PeerSet(uint32 indexed srcEid, bytes32 indexed peer);
-    event ChainIdMapped(uint256 indexed chainId, uint32 indexed dstEid);
-    event StargateForTokenSet(address indexed token, address indexed stargate);
-    event ExecutorSet(address indexed executor);
-    event IntentComposed(bytes32 indexed guid, uint32 indexed srcEid, bytes32 indexed intentId, uint256 amountLD);
-    event RefundSent(bytes32 indexed guid, uint256 destinationChainId, address recipient, address token, uint256 amount);
-
-    constructor(address endpoint, address _executor) Ownable(msg.sender) {
-        ENDPOINT = ILayerZeroEndpointV2(endpoint);
-        executor = IExecutor(_executor);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                         LAYERZERO COMPOSE RECEIVE
-    //////////////////////////////////////////////////////////////*/
+    event StargateSet(address indexed token, address indexed stargate);
 
     /**
-     * @notice LayerZero compose entrypoint (called by local EndpointV2).
-     * @dev Security model:
-     *  - Only EndpointV2 can call this function.
-     *  - `_from` must be the Stargate v2 contract expected for `intent.destinationToken` (prevents arbitrary local sendCompose abuse).
-     *  - `_message` must have `composeFrom` matching `peers[srcEid]` (source-side sender allowlist).
-     *  - Amount delivered in `_message` must match `intent.amount`.
+     * @notice Deploys a new LayerZeroStargateAdapter.
+     * @param endpoint LayerZero endpoint address on this chain.
+     * @param _executor Cross-chain executor contract address.
      */
-    function lzCompose(
-        address _from,
-        bytes32 _guid,
-        bytes calldata _message,
-        address, /*_executor*/
-        bytes calldata /*_extraData*/
-    ) external payable override {
-        if (msg.sender != address(ENDPOINT)) revert LayerZeroStargateAdapter__Unauthorized();
-
-        uint32 srcEid = OFTComposeMsgCodec.srcEid(_message);
-
-        bytes32 composeFrom = OFTComposeMsgCodec.composeFrom(_message);
-        if (composeFrom != peers[srcEid]) revert LayerZeroStargateAdapter__InvalidPeer();
-
-        uint256 amountLD = OFTComposeMsgCodec.amountLD(_message);
-
-        bytes memory inner = OFTComposeMsgCodec.composeMsg(_message);
-        IExecutor.CrossChainIntent memory intent = abi.decode(inner, (IExecutor.CrossChainIntent));
-
-        // Validate the claimed sourceChainId against LayerZero provenance srcEid using the chainId->eid mapping.
-        uint32 expectedEid = dstEidByChainId[intent.sourceChainId];
-        if (expectedEid != srcEid) {
-            revert LayerZeroStargateAdapter__SourceChainIdMismatch(intent.sourceChainId, srcEid, expectedEid);
-        }
-
-        // Ensure the compose was initiated by the correct Stargate contract for this token.
-        address expectedStargate = stargateByDestinationToken[intent.destinationToken];
-        if (expectedStargate == address(0)) revert LayerZeroStargateAdapter__TokenNotConfigured();
-        if (_from != expectedStargate) revert LayerZeroStargateAdapter__InvalidStargateComposer();
-
-        // Ensure amount matches.
-        if (intent.amount != amountLD) revert LayerZeroStargateAdapter__AmountMismatch();
-
-        // Forward funds to Executor then execute intent.
-        IERC20(intent.destinationToken).safeTransfer(address(executor), amountLD);
-        executor.executeIntent(BRIDGE_ID, intent);
-
-        emit IntentComposed(_guid, srcEid, intent.intentId, amountLD);
+    constructor(address endpoint, address _executor) Ownable(msg.sender) {
+        ENDPOINT = ILayerZeroEndpointV2(endpoint);
+        executor = _executor;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        REFUNDS (IBridgeAdapter)
-    //////////////////////////////////////////////////////////////*/
+    /**
+     * @notice Configures the trusted Stargate sender for a destination token.
+     * @param token Destination token delivered by Stargate.
+     * @param stargate Trusted Stargate contract for that token.
+     */
+    function setStargateForToken(address token, address stargate) external onlyOwner {
+        if (token == address(0) || stargate == address(0)) {
+            revert LayerZeroStargateAdapterTokenNotConfigured();
+        }
 
-    function quoteRefundFee(uint256 destinationChainId, address token, uint256 amount)
+        address previousStargate = stargateByToken[token];
+        if (previousStargate != address(0)) {
+            delete _tokenByStargate[previousStargate];
+        }
+
+        address previousToken = _tokenByStargate[stargate];
+        if (previousToken != address(0) && previousToken != token) {
+            delete stargateByToken[previousToken];
+        }
+
+        stargateByToken[token] = stargate;
+        _tokenByStargate[stargate] = token;
+
+        emit StargateSet(token, stargate);
+    }
+
+    /**
+     * @notice LayerZero compose callback for receiving Stargate OFT transfers.
+     * @dev Called by the LayerZero endpoint after a Stargate transfer with a compose message.
+     *      Validates the message provenance and forwards the intent to the executor.
+     * @param from The Stargate pool contract that initiated the compose.
+     * @param guid LayerZero GUID of the message.
+     * @param message The compose message containing the encoded intent and payload.
+     */
+    function lzCompose(address from, bytes32 guid, bytes calldata message, address, bytes calldata)
         external
-        view
+        payable
         override
-        returns (uint256 fee)
     {
-        address stargate = stargateByDestinationToken[token];
-        if (stargate == address(0)) revert LayerZeroStargateAdapter__TokenNotConfigured();
-        uint32 dstEid = dstEidByChainId[destinationChainId];
-        if (dstEid == 0) revert LayerZeroStargateAdapter__UnknownDestinationChainId();
+        if (msg.sender != address(ENDPOINT)) {
+            revert LayerZeroStargateAdapterUnauthorized();
+        }
+
+        uint32 srcEid = OFTComposeMsgCodec.srcEid(message);
+        bytes32 composeFrom = OFTComposeMsgCodec.composeFrom(message);
+        uint256 amountLD = OFTComposeMsgCodec.amountLD(message);
+
+        bytes memory inner = OFTComposeMsgCodec.composeMsg(message);
+        (ICrossChainExecutor.Intent memory intent, bytes memory payload) =
+            abi.decode(inner, (ICrossChainExecutor.Intent, bytes));
+
+        ICrossChainExecutor exec = ICrossChainExecutor(executor);
+        address expectedSender = exec.getIntentSender(intent.sourceChainId);
+        bytes32 expectedPeer = bytes32(uint256(uint160(expectedSender)));
+
+        if (expectedPeer != composeFrom) {
+            revert LayerZeroStargateAdapterInvalidPeer();
+        }
+
+        bytes4 errorSelector;
+
+        if (intent.status != ICrossChainExecutor.Status.Ongoing) {
+            errorSelector = LayerZeroStargateAdapterInvalidIntentStatus.selector;
+        } else if (exec.getLayerZeroEid(intent.sourceChainId) != srcEid) {
+            errorSelector = LayerZeroStargateAdapterEidMismatch.selector;
+        }
+
+        address receivedToken = _tokenByStargate[from];
+        if (receivedToken == address(0)) {
+            revert LayerZeroStargateAdapterTokenNotConfigured();
+        }
+
+        intent.token = receivedToken;
+        intent.amount = amountLD;
+
+        if (errorSelector != bytes4(0)) {
+            intent.status = ICrossChainExecutor.Status.Failed;
+            emit ICrossChainExecutor.IntentFailed(intent.intentId, errorSelector);
+        }
+
+        IERC20(receivedToken).safeTransfer(address(exec), amountLD);
+        exec.executeIntent(BRIDGE_ID, intent, payload);
+
+        emit IntentComposed(guid, srcEid, intent.intentId, amountLD);
+    }
+
+    /// @inheritdoc ILayerZeroStargateAdapter
+    function quoteRefundFee(
+        uint256 destinationChainId,
+        address recipient,
+        address token,
+        uint256 amount,
+        address stargate
+    ) external view override returns (uint256 fee) {
+        if (stargateByToken[token] != stargate) {
+            revert LayerZeroStargateAdapterTokenNotConfigured();
+        }
+
+        uint32 dstEid = ICrossChainExecutor(executor).getLayerZeroEid(destinationChainId);
+        if (dstEid == 0) {
+            revert LayerZeroStargateAdapterUnknownDestinationChainId();
+        }
 
         SendParam memory sendParam = SendParam({
             dstEid: dstEid,
-            to: bytes32(uint256(uint160(address(0)))), // placeholder; fee is independent of recipient for typical configs
+            to: bytes32(uint256(uint160(recipient))),
             amountLD: amount,
-            minAmountLD: amount, // conservative: require full amount delivered
+            minAmountLD: 0,
             extraOptions: "",
             composeMsg: "",
             oftCmd: ""
@@ -150,73 +180,72 @@ contract LayerZeroStargateAdapter is ILayerZeroComposer, IBridgeAdapter, Ownable
         return mfee.nativeFee;
     }
 
-    function sendRefund(uint256 destinationChainId, address recipient, address token, uint256 amount)
-        external
-        payable
-        override
-        returns (bytes32 refundId)
-    {
-        if (msg.sender != address(executor)) revert LayerZeroStargateAdapter__Unauthorized();
+    /// @inheritdoc ILayerZeroStargateAdapter
+    function sendRefund(
+        uint256 destinationChainId,
+        address recipient,
+        address token,
+        uint256 amount,
+        address stargate,
+        address feeRefundRecipient
+    ) external payable override returns (bytes32 refundId) {
+        if (msg.sender != executor) {
+            revert LayerZeroStargateAdapterUnauthorized();
+        }
 
-        address stargate = stargateByDestinationToken[token];
-        if (stargate == address(0)) revert LayerZeroStargateAdapter__TokenNotConfigured();
-        uint32 dstEid = dstEidByChainId[destinationChainId];
-        if (dstEid == 0) revert LayerZeroStargateAdapter__UnknownDestinationChainId();
+        if (stargateByToken[token] != stargate) {
+            revert LayerZeroStargateAdapterTokenNotConfigured();
+        }
+        uint32 dstEid = ICrossChainExecutor(executor).getLayerZeroEid(destinationChainId);
+        if (dstEid == 0) {
+            revert LayerZeroStargateAdapterUnknownDestinationChainId();
+        }
 
-        // Pull tokens from Executor.
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-
-        // Approve Stargate, send, then clear approval.
         IERC20(token).forceApprove(stargate, amount);
 
         SendParam memory sendParam = SendParam({
             dstEid: dstEid,
             to: bytes32(uint256(uint160(recipient))),
             amountLD: amount,
-            minAmountLD: amount, // conservative: require full amount delivered
+            minAmountLD: 0,
             extraOptions: "",
             composeMsg: "",
             oftCmd: ""
         });
 
+        MessagingFee memory requiredFee = IStargate(stargate).quoteSend(sendParam, false);
+        if (msg.value < requiredFee.nativeFee) {
+            revert LayerZeroStargateAdapterInsufficientFee(requiredFee.nativeFee, msg.value);
+        }
+
         (MessagingReceipt memory msgReceipt,) = IStargate(stargate).send{value: msg.value}(
-            sendParam,
-            MessagingFee({nativeFee: msg.value, lzTokenFee: 0}),
-            payable(address(this)) // adapter can safely receive any native refunds from Stargate/LayerZero
+            sendParam, MessagingFee({nativeFee: msg.value, lzTokenFee: 0}), payable(feeRefundRecipient)
         );
 
         IERC20(token).forceApprove(stargate, 0);
 
         refundId = msgReceipt.guid;
-        emit RefundSent(refundId, destinationChainId, recipient, token, amount);
+        emit RefundSentLZStargate(refundId, destinationChainId, recipient, token, amount);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                               ADMIN CONFIG
-    //////////////////////////////////////////////////////////////*/
-
-    function setPeer(uint32 srcEid, bytes32 peer) external onlyOwner {
-        peers[srcEid] = peer;
-        emit PeerSet(srcEid, peer);
+    /**
+     * @notice Rescue tokens held by this adapter.
+     * @dev Only callable by the owner (PoC: no protocol admin).
+     * @param token Token address to rescue.
+     * @param recipient Address receiving the rescued tokens.
+     * @param amount Amount of tokens to rescue.
+     */
+    function rescueTokens(address token, address recipient, uint256 amount) external override onlyOwner {
+        IERC20(token).safeTransfer(recipient, amount);
+        emit TokensRescued(token, recipient, amount);
     }
 
-    function setChainIdMapping(uint256 chainId, uint32 dstEid) external onlyOwner {
-        if (dstEid == 0) revert LayerZeroStargateAdapter__UnknownDestinationChainId();
-        dstEidByChainId[chainId] = dstEid;
-        emit ChainIdMapped(chainId, dstEid);
-    }
-
-    function setStargateForToken(address token, address stargate) external onlyOwner {
-        stargateByDestinationToken[token] = stargate;
-        emit StargateForTokenSet(token, stargate);
-    }
-
+    /**
+     * @notice Updates the executor address.
+     * @param _executor New executor address.
+     */
     function setExecutor(address _executor) external onlyOwner {
-        executor = IExecutor(_executor);
-        emit ExecutorSet(_executor);
+        executor = _executor;
     }
-
-    receive() external payable {}
 }
-
-
