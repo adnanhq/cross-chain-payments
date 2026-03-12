@@ -13,8 +13,8 @@ PoC cross-chain payment infrastructure prepared for **Oak Network**, using **Cha
 - **Source chain**: An authorized agent calls `IntentSender` to initiate a payment intent and bridge funds.
 - **Destination chain**: A bridge-specific adapter (`ChainlinkCCIPAdapter` or `LayerZeroStargateAdapter`) validates provenance and forwards funds to `CrossChainExecutor`.
 - **CrossChainExecutor**: Enforces idempotency via `intentId`, validates adapter integrity, approves the treasury, and dispatches the intent payload (e.g. `processPayment`).
-- **SimpleFundReceiver**: Minimal treasury that receives payments and can request refunds via `requestRefund`.
-- **Refunds**: Treasury calls `requestRefund(intentId, amount, recipient)`. An off-chain agent then calls `sendRefundCCIP` or `sendRefundLZStargate` to bridge funds back to the source chain.
+-- **SimpleFundReceiver**: Minimal treasury that receives payments and can request refunds via `createRefundIntent`.
+-- **Refunds**: Treasury calls `createRefundIntent(intentId, amount, recipient)`. An off-chain agent then calls `sendRefundCCIP` or `sendRefundLZStargate` to bridge funds back to the source chain.
 
 ### PoC Scope
 
@@ -110,10 +110,10 @@ PoC cross-chain payment infrastructure prepared for **Oak Network**, using **Cha
 
 ### Destination Chain (Initiate)
 
-1. Owner enables refunds; user calls **`SimpleFundReceiver.claimRefund(intentId)`**
+1. Owner calls **`SimpleFundReceiver.initiateRefund(intentId)`**
 2. `SimpleFundReceiver`:
    - Transfers tokens to the executor
-   - Calls **`Executor.requestRefund(intentId, amount, recipient)`**
+   - Calls **`Executor.createRefundIntent(intentId, amount, recipient)`**
 3. Executor stores the refund request (including `sourceChainId` from the original intent).
 
 ### Destination Chain (Execute)

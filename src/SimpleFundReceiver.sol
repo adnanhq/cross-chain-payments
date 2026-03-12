@@ -28,18 +28,14 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
     }
 
     /// @notice Payments by intentId
-    mapping(bytes32 => Payment) public payments;
+    mapping(bytes32 => Payment) private _payments;
 
     /// @notice Total received per token
     mapping(address => uint256) public totalReceived;
 
-    /// @notice Track if refunds are allowed (simulating campaign cancellation)
-    bool public refundsEnabled;
-
     // Errors
     error SimpleFundReceiver__Unauthorized();
     error SimpleFundReceiver__PaymentNotFound();
-    error SimpleFundReceiver__RefundsNotEnabled();
     error SimpleFundReceiver__InsufficientBalance();
 
     // Events
@@ -64,7 +60,7 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         // Record the payment
-        payments[intentId] = Payment({
+        _payments[intentId] = Payment({
             intentId: intentId, 
             sender: sender, 
             token: token, 
@@ -78,34 +74,31 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
     }
 
     /**
-     * @notice Claim a refund for a payment
-     * @dev Transfers tokens to executor and requests cross-chain refund
+     * @notice Initiate a refund for a payment
+     * @dev Approves tokens for the executor which will pull them and request a cross-chain refund
      * @param intentId The payment to refund
      */
-    function claimRefund(bytes32 intentId) external {
-        Payment memory payment = payments[intentId];
+    function initiateRefund(bytes32 intentId) external onlyOwner {
+        Payment memory payment = _payments[intentId];
 
         // Verify payment exists (amount == 0 means not found or already refunded/deleted)
         if (payment.amount == 0) revert SimpleFundReceiver__PaymentNotFound();
-
-        // Check refunds are enabled (simulating campaign failure/cancellation)
-        if (!refundsEnabled) revert SimpleFundReceiver__RefundsNotEnabled();
 
         // Check we have enough balance
         uint256 balance = IERC20(payment.token).balanceOf(address(this));
         if (balance < payment.amount) revert SimpleFundReceiver__InsufficientBalance();
 
         // Delete payment record (prevents double-refund)
-        delete payments[intentId];
+        delete _payments[intentId];
 
         // Update totals
         totalReceived[payment.token] -= payment.amount;
 
-        // Transfer tokens to executor
-        IERC20(payment.token).safeTransfer(executor, payment.amount);
+        // Approve tokens for executor to pull
+        IERC20(payment.token).forceApprove(executor, payment.amount);
 
-        // Request refund via executor - refund goes to original sender
-        ICrossChainExecutor(executor).requestRefund(intentId, payment.amount, payment.sender);
+        // Create refund intent via executor - refund goes to original sender
+        ICrossChainExecutor(executor).createRefundIntent(intentId, payment.amount, payment.sender);
 
         emit RefundInitiated(intentId, payment.token, payment.amount, payment.sender);
     }
@@ -116,19 +109,7 @@ contract SimpleFundReceiver is ISimpleFundReceiver, Ownable {
      * @return payment The payment details
      */
     function getPayment(bytes32 intentId) external view returns (Payment memory) {
-        return payments[intentId];
-    }
-
-    // Admin functions (simplified for PoC - no access control)
-
-    /// @notice Enable refunds (simulating campaign cancellation)
-    function enableRefunds() external onlyOwner {
-        refundsEnabled = true;
-    }
-
-    /// @notice Disable refunds
-    function disableRefunds() external onlyOwner {
-        refundsEnabled = false;
+        return _payments[intentId];
     }
 
     /// @notice Update the executor address

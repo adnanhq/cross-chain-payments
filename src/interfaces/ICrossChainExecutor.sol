@@ -205,13 +205,13 @@ interface ICrossChainExecutor {
     function executeIntent(bytes32 bridgeId, Intent memory intent, bytes calldata payload) external;
 
     /**
-     * @notice Records a refund request initiated by a treasury contract.
+     * @notice Creates a refund intent initiated by a treasury contract.
      * @dev Only callable by the treasury that originally received the intent funds.
      * @param intentId Unique identifier of the intent to refund.
      * @param amount Amount to refund (may be less than original if partial refund).
      * @param recipient Address on the source chain to receive the refund.
      */
-    function requestRefund(bytes32 intentId, uint256 amount, address recipient) external;
+    function createRefundIntent(bytes32 intentId, uint256 amount, address recipient) external;
 
     /**
      * @notice Bridges a refund back to the source chain via Chainlink CCIP.

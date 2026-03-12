@@ -97,7 +97,11 @@ contract CrossChainExecutor is ICrossChainExecutor, Ownable, Pausable {
     }
 
     /// @inheritdoc ICrossChainExecutor
-    function requestRefund(bytes32 intentId, uint256 amount, address recipient) external override whenNotPaused {
+    function createRefundIntent(bytes32 intentId, uint256 amount, address recipient)
+        external
+        override
+        whenNotPaused
+    {
         Intent storage storedIntent = _intents[intentId];
         if (storedIntent.status != Status.Executed) {
             revert ExecutorInvalidRefund(intentId);
@@ -111,9 +115,9 @@ contract CrossChainExecutor is ICrossChainExecutor, Ownable, Pausable {
         if (amount == 0) {
             revert ExecutorInvalidRefund(intentId);
         }
-        if (IERC20(storedIntent.token).balanceOf(address(this)) < amount) {
-            revert ExecutorInsufficientBalance();
-        }
+
+        // Pull tokens from the treasury using the allowance granted for this refund.
+        IERC20(storedIntent.token).safeTransferFrom(msg.sender, address(this), amount);
 
         storedIntent.status = Status.RefundRequested;
         storedIntent.amount = amount;
